@@ -2,7 +2,9 @@ import os
 import sqlite3
 import csv
 from datetime import datetime
+from dateutil.relativedelta import relativedelta
 from functools import wraps
+from urllib.parse import quote
 from flask import Flask, render_template, request, redirect, url_for, flash, send_file, send_from_directory, jsonify, session
 from werkzeug.utils import secure_filename
 from reportlab.lib.pagesizes import A4
@@ -129,6 +131,109 @@ def generate_admission_number():
     count = cursor.fetchone()[0]
     conn.close()
     return f'SL{year}{str(count + 1).zfill(4)}'
+
+def ensure_fee_records(student_id, admission_date, fee_per_month, discount=0):
+    """Auto-generate fee records from admission date to current month"""
+    if not admission_date:
+        return
+    
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    try:
+        admission_dt = datetime.strptime(admission_date, '%Y-%m-%d')
+    except:
+        conn.close()
+        return
+    
+    current_dt = datetime.now()
+    net_fee = fee_per_month - discount
+    
+    temp_dt = admission_dt
+    while temp_dt <= current_dt:
+        month = temp_dt.month
+        year = temp_dt.year
+        
+        cursor.execute('''
+            SELECT id FROM fees WHERE student_id = ? AND month = ? AND year = ?
+        ''', (student_id, month, year))
+        
+        if not cursor.fetchone():
+            cursor.execute('''
+                INSERT INTO fees (student_id, month, year, fee_amount, is_paid)
+                VALUES (?, ?, ?, ?, 0)
+            ''', (student_id, month, year, net_fee))
+        
+        temp_dt = temp_dt.replace(day=1) + relativedelta(months=1)
+    
+    conn.commit()
+    conn.close()
+
+def get_unpaid_months_details(student_id):
+    """Get details of all unpaid months for a student"""
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT month, year, fee_amount FROM fees 
+        WHERE student_id = ? AND is_paid = 0
+        ORDER BY year, month
+    ''', (student_id,))
+    
+    unpaid = cursor.fetchall()
+    conn.close()
+    
+    months = ['', 'January', 'February', 'March', 'April', 'May', 'June', 
+              'July', 'August', 'September', 'October', 'November', 'December']
+    
+    unpaid_list = []
+    total_due = 0
+    
+    for record in unpaid:
+        month_name = months[record['month']]
+        year = record['year']
+        amount = record['fee_amount']
+        unpaid_list.append(f"{month_name} {year} - Rs {amount:.2f}")
+        total_due += amount
+    
+    return unpaid_list, total_due
+
+def build_whatsapp_url(mobile, student_name, admission_no, unpaid_list, total_due, demand_bill_url=''):
+    """Build WhatsApp URL with encoded message"""
+    if not mobile:
+        return ''
+    
+    mobile = mobile.strip().replace('+91', '').replace(' ', '').replace('-', '')
+    
+    message = f"""✨ *Greetings from SANSA LEARN* ✨
+
+Dear Parent/Guardian,
+
+This is a courteous reminder regarding the tuition fee status for your ward.
+
+👤 *Student Details:*
+Name: {student_name}
+Admission No: {admission_no}
+
+📋 *Outstanding Fee Details:*
+"""
+    
+    if unpaid_list:
+        for item in unpaid_list:
+            message += f"\n• {item}"
+        message += f"\n\n💰 *Total Amount Due: Rs {total_due:.2f}*"
+    else:
+        message += "\nAll fees are up to date! ✅"
+    
+    if demand_bill_url:
+        message += f"\n\n📄 Download Demand Bill:\n{demand_bill_url}"
+    
+    message += "\n\nKindly clear the outstanding amount at your earliest convenience. For any queries, feel free to contact us.\n\n🙏 Thank you for your cooperation.\n\n*SANSA LEARN*\nChandmari Road Kankarbagh\n📞 9153021229, 7488039012"
+    
+    encoded_message = quote(message)
+    whatsapp_url = f"https://wa.me/91{mobile}?text={encoded_message}"
+    
+    return whatsapp_url
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -279,8 +384,13 @@ def add_student():
                 request.form.get('other_details', '')
             ))
             
+            student_id = cursor.lastrowid
             conn.commit()
             conn.close()
+            
+            ensure_fee_records(student_id, request.form.get('admission_date', datetime.now().strftime('%Y-%m-%d')),
+                             float(request.form.get('fee_per_month', 0)),
+                             float(request.form.get('discount', 0)))
             
             flash(f'Student added successfully! Admission Number: {admission_number}', 'success')
             return redirect(url_for('list_students'))
@@ -305,15 +415,37 @@ def view_student(student_id):
         flash('Student not found', 'error')
         return redirect(url_for('list_students'))
     
-    # Get fee records
+    ensure_fee_records(student_id, student['admission_date'], 
+                      student['fee_per_month'] or 0, student['discount'] or 0)
+    
     cursor.execute('''
-        SELECT * FROM fees WHERE student_id = ? ORDER BY year DESC, month DESC
+        SELECT * FROM fees WHERE student_id = ? ORDER BY year, month
     ''', (student_id,))
-    fee_records = cursor.fetchall()
+    all_fee_records = cursor.fetchall()
+    
+    months = ['', 'January', 'February', 'March', 'April', 'May', 'June', 
+              'July', 'August', 'September', 'October', 'November', 'December']
+    
+    unpaid_list, total_due = get_unpaid_months_details(student_id)
+    
+    demand_bill_url = url_for('generate_demand_bill', student_id=student_id, _external=True)
+    whatsapp_url = build_whatsapp_url(
+        student['mobile1'],
+        student['name'],
+        student['admission_number'],
+        unpaid_list,
+        total_due,
+        demand_bill_url
+    )
     
     conn.close()
     
-    return render_template('view_student.html', student=student, fee_records=fee_records)
+    return render_template('view_student.html', 
+                         student=student, 
+                         fee_records=all_fee_records,
+                         months=months,
+                         whatsapp_url=whatsapp_url,
+                         total_due=total_due)
 
 @app.route('/student/<int:student_id>/edit', methods=['GET', 'POST'])
 @login_required
@@ -540,6 +672,80 @@ def delete_fee_record(fee_id):
         flash(f'Error deleting fee record: {str(e)}', 'error')
     
     return redirect(url_for('fee_management'))
+
+@app.route('/student/<int:student_id>/fee/<int:month>/<int:year>/toggle', methods=['POST'])
+@login_required
+def toggle_fee_status(student_id, month, year):
+    """Toggle fee payment status"""
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT id, is_paid FROM fees WHERE student_id = ? AND month = ? AND year = ?
+        ''', (student_id, month, year))
+        
+        fee_record = cursor.fetchone()
+        
+        if fee_record:
+            new_status = 0 if fee_record['is_paid'] else 1
+            payment_date = datetime.now().strftime('%Y-%m-%d') if new_status else None
+            
+            cursor.execute('''
+                UPDATE fees SET is_paid = ?, payment_date = ?, payment_mode = ?
+                WHERE id = ?
+            ''', (new_status, payment_date, 'Cash' if new_status else None, fee_record['id']))
+            
+            conn.commit()
+            flash(f'Fee marked as {"paid" if new_status else "unpaid"}!', 'success')
+        
+        conn.close()
+    except Exception as e:
+        flash(f'Error updating fee status: {str(e)}', 'error')
+    
+    return redirect(request.referrer or url_for('view_student', student_id=student_id))
+
+@app.route('/students/grid')
+@login_required
+def students_grid():
+    """Display students in month-wise grid view"""
+    year = request.args.get('year', datetime.now().year, type=int)
+    
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT * FROM students ORDER BY admission_number')
+    students = cursor.fetchall()
+    
+    student_fees = {}
+    for student in students:
+        cursor.execute('''
+            SELECT month, is_paid FROM fees 
+            WHERE student_id = ? AND year = ?
+        ''', (student['id'], year))
+        
+        fees = {row['month']: row['is_paid'] for row in cursor.fetchall()}
+        student_fees[student['id']] = fees
+    
+    available_years = []
+    cursor.execute('SELECT DISTINCT year FROM fees ORDER BY year DESC')
+    available_years = [row['year'] for row in cursor.fetchall()]
+    
+    if year not in available_years and available_years:
+        available_years.append(year)
+        available_years.sort(reverse=True)
+    
+    conn.close()
+    
+    months = ['January', 'February', 'March', 'April', 'May', 'June', 
+              'July', 'August', 'September', 'October', 'November', 'December']
+    
+    return render_template('students_grid.html', 
+                         students=students,
+                         student_fees=student_fees,
+                         months=months,
+                         current_year=year,
+                         available_years=available_years)
 
 @app.route('/student/<int:student_id>/receipt/<int:fee_id>')
 @login_required
