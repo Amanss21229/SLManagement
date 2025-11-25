@@ -122,6 +122,9 @@ def init_db():
     conn.commit()
     conn.close()
 
+# Initialize database when module loads
+init_db()
+
 def generate_admission_number():
     """Generate unique admission number"""
     conn = get_db()
