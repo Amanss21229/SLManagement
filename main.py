@@ -1,6 +1,4 @@
-def main():
-    print("Hello from repl-nix-workspace!")
-
+from app import app
 
 if __name__ == "__main__":
-    main()
+    app.run()
