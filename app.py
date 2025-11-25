@@ -2,7 +2,8 @@ import os
 import sqlite3
 import csv
 from datetime import datetime
-from flask import Flask, render_template, request, redirect, url_for, flash, send_file, send_from_directory, jsonify
+from functools import wraps
+from flask import Flask, render_template, request, redirect, url_for, flash, send_file, send_from_directory, jsonify, session
 from werkzeug.utils import secure_filename
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import inch
@@ -24,6 +25,16 @@ DATABASE = 'database.db'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(PDF_FOLDER, exist_ok=True)
 os.makedirs('static/logo', exist_ok=True)
+
+# Authentication decorator
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not session.get('authenticated'):
+            flash('Please login to access this page.', 'warning')
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -115,7 +126,39 @@ def generate_admission_number():
     conn.close()
     return f'SL{year}{str(count + 1).zfill(4)}'
 
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    """Login page"""
+    if session.get('authenticated'):
+        return redirect(url_for('dashboard'))
+    
+    if request.method == 'POST':
+        password = request.form.get('password', '')
+        admin_password = os.environ.get('ADMIN_PASSWORD', '')
+        
+        if not admin_password:
+            flash('System configuration error. Please contact administrator.', 'error')
+            return render_template('login.html')
+        
+        if password == admin_password:
+            session['authenticated'] = True
+            session.permanent = True
+            flash('Login successful!', 'success')
+            return redirect(url_for('dashboard'))
+        else:
+            flash('Incorrect password. Please try again.', 'error')
+    
+    return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    """Logout and clear session"""
+    session.clear()
+    flash('You have been logged out successfully.', 'success')
+    return redirect(url_for('login'))
+
 @app.route('/')
+@login_required
 def dashboard():
     """Main dashboard"""
     conn = get_db()
@@ -149,11 +192,13 @@ def dashboard():
                          total_pending=total_pending_this_month)
 
 @app.route('/uploads/<filename>')
+@login_required
 def uploaded_file(filename):
     """Serve uploaded student photos"""
     return send_from_directory(UPLOAD_FOLDER, filename)
 
 @app.route('/students')
+@login_required
 def list_students():
     """List all students"""
     search_query = request.args.get('search', '')
@@ -182,6 +227,7 @@ def list_students():
                          search_query=search_query, search_type=search_type)
 
 @app.route('/student/add', methods=['GET', 'POST'])
+@login_required
 def add_student():
     """Add new student"""
     if request.method == 'POST':
@@ -242,6 +288,7 @@ def add_student():
     return render_template('add_student.html')
 
 @app.route('/student/<int:student_id>')
+@login_required
 def view_student(student_id):
     """View student profile"""
     conn = get_db()
@@ -265,6 +312,7 @@ def view_student(student_id):
     return render_template('view_student.html', student=student, fee_records=fee_records)
 
 @app.route('/student/<int:student_id>/edit', methods=['GET', 'POST'])
+@login_required
 def edit_student(student_id):
     """Edit student details"""
     conn = get_db()
@@ -335,6 +383,7 @@ def edit_student(student_id):
     return render_template('edit_student.html', student=student)
 
 @app.route('/student/<int:student_id>/delete', methods=['POST'])
+@login_required
 def delete_student(student_id):
     """Delete student"""
     try:
@@ -358,6 +407,7 @@ def delete_student(student_id):
     return redirect(url_for('list_students'))
 
 @app.route('/fees')
+@login_required
 def fee_management():
     """Fee management page"""
     conn = get_db()
@@ -374,6 +424,7 @@ def fee_management():
     return render_template('fee_management.html', students=students)
 
 @app.route('/student/<int:student_id>/fees')
+@login_required
 def student_fees(student_id):
     """Manage fees for a specific student"""
     conn = get_db()
@@ -415,6 +466,7 @@ def student_fees(student_id):
                          total_paid=total_paid, total_pending=total_pending)
 
 @app.route('/student/<int:student_id>/fees/add', methods=['POST'])
+@login_required
 def add_fee_record(student_id):
     """Add or mark fee as paid"""
     try:
@@ -460,6 +512,7 @@ def add_fee_record(student_id):
     return redirect(url_for('student_fees', student_id=student_id))
 
 @app.route('/fees/<int:fee_id>/delete', methods=['POST'])
+@login_required
 def delete_fee_record(fee_id):
     """Delete fee record"""
     try:
@@ -485,6 +538,7 @@ def delete_fee_record(fee_id):
     return redirect(url_for('fee_management'))
 
 @app.route('/student/<int:student_id>/receipt/<int:fee_id>')
+@login_required
 def generate_receipt(student_id, fee_id):
     """Generate PDF receipt for a payment"""
     conn = get_db()
@@ -589,6 +643,7 @@ def generate_receipt(student_id, fee_id):
     return send_file(filepath, as_attachment=True)
 
 @app.route('/student/<int:student_id>/demand')
+@login_required
 def generate_demand_bill(student_id):
     """Generate PDF demand bill for unpaid fees"""
     conn = get_db()
@@ -715,6 +770,7 @@ def generate_demand_bill(student_id):
     return send_file(filepath, as_attachment=True)
 
 @app.route('/export/students')
+@login_required
 def export_students():
     """Export all students to CSV"""
     conn = get_db()
@@ -750,6 +806,7 @@ def export_students():
     return send_file(filepath, as_attachment=True)
 
 @app.route('/export/fees')
+@login_required
 def export_fees():
     """Export all fees to CSV"""
     conn = get_db()
