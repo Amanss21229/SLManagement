@@ -132,7 +132,7 @@ def generate_admission_number():
     conn.close()
     return f'SL{year}{str(count + 1).zfill(4)}'
 
-def ensure_fee_records(student_id, admission_date, fee_per_month, discount=0):
+def ensure_fee_records(student_id, admission_date, fee_per_month, discount=0.0):
     """Auto-generate fee records from admission date to current month"""
     if not admission_date:
         return
