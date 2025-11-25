@@ -2,7 +2,7 @@ import os
 import sqlite3
 import csv
 from datetime import datetime
-from flask import Flask, render_template, request, redirect, url_for, flash, send_file, jsonify
+from flask import Flask, render_template, request, redirect, url_for, flash, send_file, send_from_directory, jsonify
 from werkzeug.utils import secure_filename
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import inch
@@ -147,6 +147,11 @@ def dashboard():
                          total_students=total_students,
                          total_paid=total_paid_this_month,
                          total_pending=total_pending_this_month)
+
+@app.route('/uploads/<filename>')
+def uploaded_file(filename):
+    """Serve uploaded student photos"""
+    return send_from_directory(UPLOAD_FOLDER, filename)
 
 @app.route('/students')
 def list_students():

@@ -18,7 +18,7 @@
                         </div>
                         <div class="col-md-6">
                             {% if student.photo_path %}
-                            <img src="{{ url_for('static', filename='../' + student.photo_path) }}" 
+                            <img src="{{ url_for('uploaded_file', filename=student.photo_path.split('/')[-1]) }}" 
                                  alt="{{ student.name }}" style="max-width: 100px;">
                             {% endif %}
                         </div>

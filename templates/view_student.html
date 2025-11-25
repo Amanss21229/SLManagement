@@ -8,7 +8,7 @@
         <div class="card mb-3">
             <div class="card-body text-center">
                 {% if student.photo_path %}
-                <img src="{{ url_for('static', filename='../' + student.photo_path) }}" 
+                <img src="{{ url_for('uploaded_file', filename=student.photo_path.split('/')[-1]) }}" 
                      alt="{{ student.name }}" class="img-fluid rounded mb-3" style="max-width: 200px;">
                 {% else %}
                 <div class="mb-3">
