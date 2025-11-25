@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Sansa Learn{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12 text-center mb-4">
+        <img src="{{ url_for('static', filename='logo/logo.png') }}" alt="Sansa Learn Logo" style="max-width: 200px; height: auto;">
+        <h2 class="mt-3">Student Management Dashboard</h2>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-4 mb-3">
+        <div class="card text-white bg-primary">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="card-title">Total Students</h6>
+                        <h2 class="mb-0">{{ total_students }}</h2>
+                    </div>
+                    <div>
+                        <i class="fas fa-users fa-3x opacity-50"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4 mb-3">
+        <div class="card text-white bg-success">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="card-title">Paid This Month</h6>
+                        <h2 class="mb-0">₹{{ "%.2f"|format(total_paid) }}</h2>
+                    </div>
+                    <div>
+                        <i class="fas fa-check-circle fa-3x opacity-50"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4 mb-3">
+        <div class="card text-white bg-warning">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="card-title">Pending This Month</h6>
+                        <h2 class="mb-0">₹{{ "%.2f"|format(total_pending) }}</h2>
+                    </div>
+                    <div>
+                        <i class="fas fa-exclamation-circle fa-3x opacity-50"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title mb-3">Quick Search</h5>
+                <form action="{{ url_for('list_students') }}" method="GET" class="row g-3">
+                    <div class="col-md-3">
+                        <select name="search_type" class="form-select">
+                            <option value="name">Student Name</option>
+                            <option value="admission">Admission Number</option>
+                            <option value="father">Father Name</option>
+                        </select>
+                    </div>
+                    <div class="col-md-7">
+                        <input type="text" name="search" class="form-control" placeholder="Enter search term...">
+                    </div>
+                    <div class="col-md-2">
+                        <button type="submit" class="btn btn-primary w-100">
+                            <i class="fas fa-search"></i> Search
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-4 mb-3">
+        <a href="{{ url_for('add_student') }}" class="card text-decoration-none action-card">
+            <div class="card-body text-center">
+                <i class="fas fa-user-plus fa-3x text-primary mb-3"></i>
+                <h5 class="card-title">Add Student</h5>
+                <p class="card-text text-muted">Register new student</p>
+            </div>
+        </a>
+    </div>
+    
+    <div class="col-md-4 mb-3">
+        <a href="{{ url_for('list_students') }}" class="card text-decoration-none action-card">
+            <div class="card-body text-center">
+                <i class="fas fa-list fa-3x text-success mb-3"></i>
+                <h5 class="card-title">View All Students</h5>
+                <p class="card-text text-muted">Manage student records</p>
+            </div>
+        </a>
+    </div>
+    
+    <div class="col-md-4 mb-3">
+        <a href="{{ url_for('fee_management') }}" class="card text-decoration-none action-card">
+            <div class="card-body text-center">
+                <i class="fas fa-money-bill-wave fa-3x text-warning mb-3"></i>
+                <h5 class="card-title">Fee Management</h5>
+                <p class="card-text text-muted">Track payments</p>
+            </div>
+        </a>
+    </div>
+</div>
+{% endblock %}
