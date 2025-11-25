@@ -13,7 +13,11 @@ from PIL import Image
 import io
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SESSION_SECRET', 'dev-secret-key-change-in-production')
+
+# Security: Require SESSION_SECRET from environment
+if not os.environ.get('SESSION_SECRET'):
+    raise RuntimeError("SESSION_SECRET environment variable must be set for security. Please add it to Replit Secrets.")
+app.secret_key = os.environ.get('SESSION_SECRET')
 
 # Configuration
 UPLOAD_FOLDER = 'uploads'
