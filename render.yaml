@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: sansa-learn
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --bind 0.0.0.0:$PORT main:app
+    envVars:
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: MANAGER_PASSWORD
+        sync: false
+      - key: PYTHON_VERSION
+        value: "3.11.0"
