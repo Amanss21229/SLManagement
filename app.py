@@ -246,7 +246,7 @@ def login():
     
     if request.method == 'POST':
         password = request.form.get('password', '')
-        admin_password = os.environ.get('ADMIN_PASSWORD', '')
+        admin_password = os.environ.get('MANAGER_PASSWORD', '')
         
         if not admin_password:
             flash('System configuration error. Please contact administrator.', 'error')
