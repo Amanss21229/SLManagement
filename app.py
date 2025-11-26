@@ -779,20 +779,31 @@ def generate_receipt(student_id, fee_id):
     c = canvas.Canvas(filepath, pagesize=A4)
     width, height = A4
     
+    # Add Logo
+    logo_path = 'static/logo/logo.png'
+    if os.path.exists(logo_path):
+        try:
+            logo_width = 80
+            logo_height = 80
+            c.drawImage(logo_path, (width - logo_width) / 2, height - 90, 
+                       width=logo_width, height=logo_height, preserveAspectRatio=True, mask='auto')
+        except:
+            pass
+    
     # Header
     c.setFont("Helvetica-Bold", 20)
-    c.drawCentredString(width/2, height - 50, "SANSA LEARN")
+    c.drawCentredString(width/2, height - 110, "SANSA LEARN")
     
     c.setFont("Helvetica", 10)
-    c.drawCentredString(width/2, height - 70, institute['address'])
-    c.drawCentredString(width/2, height - 85, f"Contact: {institute['contact']}")
+    c.drawCentredString(width/2, height - 130, institute['address'])
+    c.drawCentredString(width/2, height - 145, f"Contact: {institute['contact']}")
     
     # Title
     c.setFont("Helvetica-Bold", 16)
-    c.drawCentredString(width/2, height - 120, "FEE RECEIPT")
+    c.drawCentredString(width/2, height - 175, "FEE RECEIPT")
     
     # Receipt details
-    y = height - 160
+    y = height - 215
     c.setFont("Helvetica", 11)
     
     months = ['', 'January', 'February', 'March', 'April', 'May', 'June', 
@@ -887,19 +898,30 @@ def generate_demand_bill(student_id):
     c = canvas.Canvas(filepath, pagesize=A4)
     width, height = A4
     
+    # Add Logo
+    logo_path = 'static/logo/logo.png'
+    if os.path.exists(logo_path):
+        try:
+            logo_width = 80
+            logo_height = 80
+            c.drawImage(logo_path, (width - logo_width) / 2, height - 90, 
+                       width=logo_width, height=logo_height, preserveAspectRatio=True, mask='auto')
+        except:
+            pass
+    
     # Header
     c.setFont("Helvetica-Bold", 20)
-    c.drawCentredString(width/2, height - 50, "SANSA LEARN")
+    c.drawCentredString(width/2, height - 110, "SANSA LEARN")
     
     c.setFont("Helvetica", 10)
-    c.drawCentredString(width/2, height - 70, institute['address'])
-    c.drawCentredString(width/2, height - 85, f"Contact: {institute['contact']}")
+    c.drawCentredString(width/2, height - 130, institute['address'])
+    c.drawCentredString(width/2, height - 145, f"Contact: {institute['contact']}")
     
     # Title
     c.setFont("Helvetica-Bold", 16)
-    c.drawCentredString(width/2, height - 120, "FEE DEMAND NOTICE")
+    c.drawCentredString(width/2, height - 175, "FEE DEMAND NOTICE")
     
-    y = height - 160
+    y = height - 215
     c.setFont("Helvetica", 11)
     c.drawRightString(width - 50, y, f"Date: {datetime.now().strftime('%Y-%m-%d')}")
     
