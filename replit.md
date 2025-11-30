@@ -94,4 +94,4 @@ The app runs on port 5000. Access via the Replit webview.
 - Name: Sansa Learn
 - Logo: Golden tree design with books
 - Address: Chandmari Road Kankarbagh gali no. 06 ke thik saamne
-- Contact: 9153021229, 7488039012
+- Contact: 9296820840, 9153021229
