@@ -116,7 +116,7 @@ def init_db():
     if cursor.fetchone()[0] == 0:
         cursor.execute('''
             INSERT INTO institute_info (id, address, contact) 
-            VALUES (1, 'Chandmari Road Kankarbagh gali no. 06 ke thik saamne', '9153021229, 7488039012')
+            VALUES (1, 'Chandmari Road Kankarbagh gali no. 06 ke thik saamne', '9296820840, 9153021229')
         ''')
     
     conn.commit()
@@ -231,7 +231,7 @@ Admission No: {admission_no}
     if demand_bill_url:
         message += f"\n\n📄 Download Demand Bill:\n{demand_bill_url}"
     
-    message += "\n\nKindly clear the outstanding amount at your earliest convenience. For any queries, feel free to contact us.\n\n🙏 Thank you for your cooperation.\n\n*SANSA LEARN*\nChandmari Road Kankarbagh\n📞 9153021229, 7488039012"
+    message += "\n\nKindly clear the outstanding amount at your earliest convenience. For any queries, feel free to contact us.\n\n🙏 Thank you for your cooperation.\n\n*SANSA LEARN*\nChandmari Road Kankarbagh\n📞 9296820840, 9153021229"
     
     encoded_message = quote(message)
     whatsapp_url = f"https://wa.me/91{mobile}?text={encoded_message}"
