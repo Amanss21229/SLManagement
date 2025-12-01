@@ -857,9 +857,19 @@ def generate_receipt(student_id, fee_id):
     y = 150
     c.setFont("Helvetica", 10)
     c.drawString(50, y, "For Sansa Learn")
-    y -= 60
-    c.drawString(50, y, "_____________________")
-    y -= 15
+    
+    # Add Signature Image
+    signature_path = 'static/logo/signature.jpg'
+    if os.path.exists(signature_path):
+        try:
+            sig_width = 100
+            sig_height = 40
+            c.drawImage(signature_path, 50, y - 55, width=sig_width, height=sig_height, 
+                       preserveAspectRatio=True)
+        except:
+            pass
+    
+    y -= 65
     c.drawString(50, y, "Management Signature")
     
     c.save()
@@ -995,9 +1005,19 @@ def generate_demand_bill(student_id):
     y = 150
     c.setFont("Helvetica", 10)
     c.drawString(50, y, "For Sansa Learn")
-    y -= 60
-    c.drawString(50, y, "_____________________")
-    y -= 15
+    
+    # Add Signature Image
+    signature_path = 'static/logo/signature.jpg'
+    if os.path.exists(signature_path):
+        try:
+            sig_width = 100
+            sig_height = 40
+            c.drawImage(signature_path, 50, y - 55, width=sig_width, height=sig_height, 
+                       preserveAspectRatio=True)
+        except:
+            pass
+    
+    y -= 65
     c.drawString(50, y, "Management Signature")
     
     c.save()
