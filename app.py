@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import csv
+import hashlib
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from functools import wraps
@@ -41,6 +42,17 @@ def login_required(f):
             return redirect(url_for('login'))
         return f(*args, **kwargs)
     return decorated_function
+
+def generate_pdf_token(admission_number):
+    """Generate a secure token for public PDF access"""
+    secret = os.environ.get('SESSION_SECRET', 'default')
+    data = f"{admission_number}-{secret}"
+    return hashlib.sha256(data.encode()).hexdigest()[:16]
+
+def verify_pdf_token(admission_number, token):
+    """Verify the PDF access token"""
+    expected_token = generate_pdf_token(admission_number)
+    return token == expected_token
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -431,7 +443,12 @@ def view_student(student_id):
     
     unpaid_list, total_due = get_unpaid_months_details(student_id)
     
-    demand_bill_url = url_for('generate_demand_bill', student_id=student_id, _external=True)
+    # Generate public demand bill URL (no login required)
+    token = generate_pdf_token(student['admission_number'])
+    demand_bill_url = url_for('public_demand_bill', 
+                              admission_number=student['admission_number'], 
+                              token=token, 
+                              _external=True)
     whatsapp_url = build_whatsapp_url(
         student['mobile1'],
         student['name'],
@@ -1021,6 +1038,290 @@ def generate_demand_bill(student_id):
     c.save()
     
     return send_file(filepath, as_attachment=True)
+
+# ============ PUBLIC PDF DOWNLOAD ROUTES (No Login Required) ============
+
+@app.route('/public/demand/<admission_number>/<token>')
+def public_demand_bill(admission_number, token):
+    """Public route for parents to download demand bill without login"""
+    if not verify_pdf_token(admission_number, token):
+        return "Invalid or expired link", 403
+    
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT * FROM students WHERE admission_number = ?', (admission_number,))
+    student = cursor.fetchone()
+    
+    if not student:
+        conn.close()
+        return "Student not found", 404
+    
+    cursor.execute('''
+        SELECT * FROM fees WHERE student_id = ? AND is_paid = 0 
+        ORDER BY year, month
+    ''', (student['id'],))
+    unpaid_fees = cursor.fetchall()
+    
+    cursor.execute('SELECT * FROM institute_info WHERE id = 1')
+    institute = cursor.fetchone()
+    
+    conn.close()
+    
+    # Generate PDF
+    filename = f"demand_{admission_number}_{datetime.now().strftime('%Y%m%d')}.pdf"
+    filepath = os.path.join(PDF_FOLDER, filename)
+    
+    c = canvas.Canvas(filepath, pagesize=A4)
+    width, height = A4
+    
+    # Add Logo
+    logo_path = 'static/logo/logo.png'
+    if os.path.exists(logo_path):
+        try:
+            logo_width = 80
+            logo_height = 80
+            c.drawImage(logo_path, (width - logo_width) / 2, height - 90, 
+                       width=logo_width, height=logo_height, preserveAspectRatio=True, mask='auto')
+        except:
+            pass
+    
+    # Header
+    c.setFont("Helvetica-Bold", 20)
+    c.drawCentredString(width/2, height - 110, "SANSA LEARN")
+    
+    c.setFont("Helvetica", 10)
+    c.drawCentredString(width/2, height - 130, institute['address'] if institute else '')
+    c.drawCentredString(width/2, height - 145, f"Contact: {institute['contact']}" if institute else '')
+    
+    # Title
+    c.setFont("Helvetica-Bold", 16)
+    c.drawCentredString(width/2, height - 175, "FEE DEMAND NOTICE")
+    
+    y = height - 215
+    c.setFont("Helvetica", 11)
+    c.drawRightString(width - 50, y, f"Date: {datetime.now().strftime('%Y-%m-%d')}")
+    
+    y -= 30
+    c.line(50, y, width - 50, y)
+    y -= 25
+    
+    # Student details
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(50, y, "Student Details:")
+    y -= 20
+    
+    c.setFont("Helvetica", 10)
+    c.drawString(70, y, f"Admission No: {student['admission_number']}")
+    y -= 18
+    c.drawString(70, y, f"Name: {student['name']}")
+    y -= 18
+    c.drawString(70, y, f"Father's Name: {student['father_name']}")
+    y -= 18
+    c.drawString(70, y, f"Class: {student['class']}")
+    
+    y -= 30
+    c.line(50, y, width - 50, y)
+    y -= 25
+    
+    # Unpaid fees details
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(50, y, "Pending Fee Details:")
+    y -= 25
+    
+    months = ['', 'January', 'February', 'March', 'April', 'May', 'June', 
+              'July', 'August', 'September', 'October', 'November', 'December']
+    
+    # Table header
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(70, y, "Month")
+    c.drawString(200, y, "Year")
+    c.drawRightString(width - 70, y, "Amount (Rs.)")
+    y -= 18
+    c.line(70, y, width - 50, y)
+    y -= 5
+    
+    # Table rows
+    c.setFont("Helvetica", 10)
+    total_pending = 0
+    for fee in unpaid_fees:
+        y -= 15
+        if y < 150:
+            c.showPage()
+            y = height - 50
+        
+        c.drawString(70, y, months[fee['month']])
+        c.drawString(200, y, str(fee['year']))
+        c.drawRightString(width - 70, y, f"{fee['fee_amount']:.2f}")
+        total_pending += fee['fee_amount']
+    
+    y -= 20
+    c.line(70, y, width - 50, y)
+    y -= 20
+    
+    # Total
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(70, y, "Total Pending:")
+    c.drawRightString(width - 70, y, f"Rs. {total_pending:.2f}")
+    
+    y -= 40
+    c.setFont("Helvetica", 10)
+    c.drawString(50, y, "Kindly clear the above pending fees at the earliest.")
+    
+    # Footer
+    y = 150
+    c.setFont("Helvetica", 10)
+    c.drawString(50, y, "For Sansa Learn")
+    
+    # Add Signature Image
+    signature_path = 'static/logo/signature.jpg'
+    if os.path.exists(signature_path):
+        try:
+            sig_width = 150
+            sig_height = 50
+            c.drawImage(signature_path, 50, y - 60, width=sig_width, height=sig_height)
+        except:
+            pass
+    
+    y -= 70
+    c.drawString(50, y, "Management Signature")
+    
+    c.save()
+    
+    return send_file(filepath, as_attachment=True)
+
+@app.route('/public/receipt/<admission_number>/<int:fee_id>/<token>')
+def public_receipt(admission_number, fee_id, token):
+    """Public route for parents to download receipt without login"""
+    if not verify_pdf_token(admission_number, token):
+        return "Invalid or expired link", 403
+    
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT * FROM students WHERE admission_number = ?', (admission_number,))
+    student = cursor.fetchone()
+    
+    if not student:
+        conn.close()
+        return "Student not found", 404
+    
+    cursor.execute('SELECT * FROM fees WHERE id = ? AND student_id = ?', (fee_id, student['id']))
+    fee = cursor.fetchone()
+    
+    if not fee:
+        conn.close()
+        return "Receipt not found", 404
+    
+    cursor.execute('SELECT * FROM institute_info WHERE id = 1')
+    institute = cursor.fetchone()
+    
+    conn.close()
+    
+    # Generate PDF
+    filename = f"receipt_{admission_number}_{fee['month']}_{fee['year']}.pdf"
+    filepath = os.path.join(PDF_FOLDER, filename)
+    
+    c = canvas.Canvas(filepath, pagesize=A4)
+    width, height = A4
+    
+    # Add Logo
+    logo_path = 'static/logo/logo.png'
+    if os.path.exists(logo_path):
+        try:
+            logo_width = 80
+            logo_height = 80
+            c.drawImage(logo_path, (width - logo_width) / 2, height - 90, 
+                       width=logo_width, height=logo_height, preserveAspectRatio=True, mask='auto')
+        except:
+            pass
+    
+    # Header
+    c.setFont("Helvetica-Bold", 20)
+    c.drawCentredString(width/2, height - 110, "SANSA LEARN")
+    
+    c.setFont("Helvetica", 10)
+    c.drawCentredString(width/2, height - 130, institute['address'] if institute else '')
+    c.drawCentredString(width/2, height - 145, f"Contact: {institute['contact']}" if institute else '')
+    
+    # Title
+    c.setFont("Helvetica-Bold", 16)
+    c.drawCentredString(width/2, height - 175, "FEE RECEIPT")
+    
+    # Receipt details
+    y = height - 215
+    c.setFont("Helvetica", 11)
+    
+    months = ['', 'January', 'February', 'March', 'April', 'May', 'June', 
+              'July', 'August', 'September', 'October', 'November', 'December']
+    
+    receipt_no = f"REC{fee['year']}{str(fee['month']).zfill(2)}{str(fee['id']).zfill(4)}"
+    c.drawString(50, y, f"Receipt No: {receipt_no}")
+    c.drawRightString(width - 50, y, f"Date: {fee['payment_date']}")
+    
+    y -= 30
+    c.line(50, y, width - 50, y)
+    y -= 25
+    
+    # Student details
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(50, y, "Student Details:")
+    y -= 20
+    
+    c.setFont("Helvetica", 10)
+    c.drawString(70, y, f"Admission No: {student['admission_number']}")
+    y -= 18
+    c.drawString(70, y, f"Name: {student['name']}")
+    y -= 18
+    c.drawString(70, y, f"Father's Name: {student['father_name']}")
+    y -= 18
+    c.drawString(70, y, f"Class: {student['class']}")
+    
+    y -= 30
+    c.line(50, y, width - 50, y)
+    y -= 25
+    
+    # Payment details
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(50, y, "Payment Details:")
+    y -= 20
+    
+    c.setFont("Helvetica", 10)
+    c.drawString(70, y, f"Fee Month: {months[fee['month']]} {fee['year']}")
+    y -= 18
+    c.drawString(70, y, f"Amount Paid: Rs. {fee['fee_amount']:.2f}")
+    y -= 18
+    c.drawString(70, y, f"Payment Mode: {fee['payment_mode']}")
+    if fee['remarks']:
+        y -= 18
+        c.drawString(70, y, f"Remarks: {fee['remarks']}")
+    
+    y -= 30
+    c.line(50, y, width - 50, y)
+    
+    # Footer
+    y = 150
+    c.setFont("Helvetica", 10)
+    c.drawString(50, y, "For Sansa Learn")
+    
+    # Add Signature Image
+    signature_path = 'static/logo/signature.jpg'
+    if os.path.exists(signature_path):
+        try:
+            sig_width = 150
+            sig_height = 50
+            c.drawImage(signature_path, 50, y - 60, width=sig_width, height=sig_height)
+        except:
+            pass
+    
+    y -= 70
+    c.drawString(50, y, "Management Signature")
+    
+    c.save()
+    
+    return send_file(filepath, as_attachment=True)
+
+# ============ END PUBLIC PDF ROUTES ============
 
 @app.route('/export/students')
 @login_required
