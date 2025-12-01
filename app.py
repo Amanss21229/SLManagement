@@ -862,14 +862,13 @@ def generate_receipt(student_id, fee_id):
     signature_path = 'static/logo/signature.jpg'
     if os.path.exists(signature_path):
         try:
-            sig_width = 100
-            sig_height = 40
-            c.drawImage(signature_path, 50, y - 55, width=sig_width, height=sig_height, 
-                       preserveAspectRatio=True)
+            sig_width = 150
+            sig_height = 50
+            c.drawImage(signature_path, 50, y - 60, width=sig_width, height=sig_height)
         except:
             pass
     
-    y -= 65
+    y -= 70
     c.drawString(50, y, "Management Signature")
     
     c.save()
@@ -1010,14 +1009,13 @@ def generate_demand_bill(student_id):
     signature_path = 'static/logo/signature.jpg'
     if os.path.exists(signature_path):
         try:
-            sig_width = 100
-            sig_height = 40
-            c.drawImage(signature_path, 50, y - 55, width=sig_width, height=sig_height, 
-                       preserveAspectRatio=True)
+            sig_width = 150
+            sig_height = 50
+            c.drawImage(signature_path, 50, y - 60, width=sig_width, height=sig_height)
         except:
             pass
     
-    y -= 65
+    y -= 70
     c.drawString(50, y, "Management Signature")
     
     c.save()
