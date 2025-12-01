@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+
+{% block title %}Registration Successful - Sansa Learn{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+    <div class="row justify-content-center">
+        <div class="col-md-8 col-lg-6">
+            <div class="card shadow-lg border-0">
+                <div class="card-body text-center p-5">
+                    <div class="success-icon mb-4">
+                        <i class="fas fa-check-circle text-success" style="font-size: 80px;"></i>
+                    </div>
+                    
+                    <h2 class="text-success mb-3">Registration Successful!</h2>
+                    
+                    <div class="student-details bg-light rounded p-4 mb-4">
+                        <div class="row text-start">
+                            <div class="col-12 mb-3 text-center">
+                                {% if student.photo_path %}
+                                <img src="{{ url_for('static', filename=student.photo_path.replace('uploads/', '../uploads/')) }}" 
+                                     alt="{{ student.name }}" 
+                                     class="rounded-circle border border-3 border-primary"
+                                     style="width: 100px; height: 100px; object-fit: cover;"
+                                     onerror="this.src='https://via.placeholder.com/100?text=No+Photo'">
+                                {% else %}
+                                <div class="rounded-circle bg-secondary d-inline-flex align-items-center justify-content-center" 
+                                     style="width: 100px; height: 100px;">
+                                    <i class="fas fa-user text-white" style="font-size: 40px;"></i>
+                                </div>
+                                {% endif %}
+                            </div>
+                            
+                            <div class="col-6">
+                                <p class="mb-2"><strong>Name:</strong></p>
+                            </div>
+                            <div class="col-6">
+                                <p class="mb-2">{{ student.name }}</p>
+                            </div>
+                            
+                            <div class="col-6">
+                                <p class="mb-2"><strong>Admission No:</strong></p>
+                            </div>
+                            <div class="col-6">
+                                <p class="mb-2 text-primary fw-bold">{{ student.admission_number }}</p>
+                            </div>
+                            
+                            <div class="col-6">
+                                <p class="mb-2"><strong>Father's Name:</strong></p>
+                            </div>
+                            <div class="col-6">
+                                <p class="mb-2">{{ student.father_name }}</p>
+                            </div>
+                            
+                            <div class="col-6">
+                                <p class="mb-2"><strong>Class:</strong></p>
+                            </div>
+                            <div class="col-6">
+                                <p class="mb-2">{{ student.class or 'N/A' }}</p>
+                            </div>
+                            
+                            <div class="col-6">
+                                <p class="mb-0"><strong>Mobile:</strong></p>
+                            </div>
+                            <div class="col-6">
+                                <p class="mb-0">{{ student.mobile1 or 'N/A' }}</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <p class="text-muted mb-4">
+                        Send registration confirmation to parent via WhatsApp with the student's profile card.
+                    </p>
+                    
+                    <div class="d-grid gap-3">
+                        {% if whatsapp_url %}
+                        <a href="{{ whatsapp_url }}" 
+                           target="_blank" 
+                           class="btn btn-success btn-lg">
+                            <i class="fab fa-whatsapp me-2"></i> Send WhatsApp Message
+                        </a>
+                        {% else %}
+                        <button class="btn btn-secondary btn-lg" disabled>
+                            <i class="fab fa-whatsapp me-2"></i> No Mobile Number Available
+                        </button>
+                        {% endif %}
+                        
+                        <a href="{{ profile_pdf_url }}" 
+                           target="_blank" 
+                           class="btn btn-outline-primary">
+                            <i class="fas fa-file-pdf me-2"></i> Download Profile PDF
+                        </a>
+                        
+                        <div class="d-flex gap-2">
+                            <a href="{{ url_for('view_student', student_id=student.id) }}" 
+                               class="btn btn-outline-secondary flex-fill">
+                                <i class="fas fa-eye me-1"></i> View Profile
+                            </a>
+                            <a href="{{ url_for('add_student') }}" 
+                               class="btn btn-primary flex-fill">
+                                <i class="fas fa-plus me-1"></i> Add Another
+                            </a>
+                        </div>
+                        
+                        <a href="{{ url_for('list_students') }}" 
+                           class="btn btn-link text-muted">
+                            <i class="fas fa-arrow-left me-1"></i> Back to Students List
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.success-icon {
+    animation: scaleIn 0.5s ease-out;
+}
+
+@keyframes scaleIn {
+    0% {
+        transform: scale(0);
+        opacity: 0;
+    }
+    50% {
+        transform: scale(1.2);
+    }
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+.card {
+    border-radius: 15px;
+    overflow: hidden;
+}
+
+.student-details {
+    border-left: 4px solid #0d6efd;
+}
+
+.btn-success {
+    background: linear-gradient(135deg, #25D366, #128C7E);
+    border: none;
+    padding: 12px 24px;
+    font-size: 1.1rem;
+}
+
+.btn-success:hover {
+    background: linear-gradient(135deg, #128C7E, #075E54);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(37, 211, 102, 0.4);
+}
+</style>
+{% endblock %}

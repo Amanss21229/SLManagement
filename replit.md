@@ -39,7 +39,7 @@ Manage student records, track monthly fee payments, generate PDF receipts and de
 ```
 
 ## Key Features
-1. **Password-Protected Access** - Secure login system with ADMIN_PASSWORD
+1. **Password-Protected Access** - Secure login system with MANAGER_PASSWORD
 2. Complete CRUD for student records
 3. Monthly fee tracking with paid/unpaid status
 4. PDF receipt generation with institute branding
@@ -48,6 +48,9 @@ Manage student records, track monthly fee payments, generate PDF receipts and de
 7. CSV export for students and fees
 8. Mobile-responsive UI
 9. Auto-generated admission numbers
+10. **WhatsApp Integration** - One-click message sending to parents
+11. **Public PDF Links** - Parents can download PDFs without login (token-secured)
+12. **Registration Success Page** - Premium WhatsApp message with student profile PDF
 
 ## Database Schema
 - **students**: id, admission_number, photo_path, name, father_name, mother_name, dob, gender, class, board, medium, school_name, address, mobile1, mobile2, fee_per_month, discount, admission_date, other_details
@@ -87,8 +90,14 @@ The app runs on port 5000. Access via the Replit webview.
 - / - Dashboard with statistics
 - /students - View all students
 - /student/add - Add new student
+- /student/{id}/registration-success - Registration success with WhatsApp button
 - /fees - Fee management
 - /logout - Logout from system
+
+**Public Routes (no login required - for parents):**
+- /public/profile/{admission_no}/{token} - Download student profile PDF
+- /public/demand/{admission_no}/{token} - Download demand bill PDF
+- /public/receipt/{admission_no}/{fee_id}/{token} - Download fee receipt PDF
 
 ## Institute Branding
 - Name: Sansa Learn

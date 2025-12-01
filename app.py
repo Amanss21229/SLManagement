@@ -250,6 +250,50 @@ Admission No: {admission_no}
     
     return whatsapp_url
 
+def build_registration_whatsapp_url(mobile, student_name, admission_no, father_name, class_name, profile_pdf_url):
+    """Build WhatsApp URL for registration success message"""
+    if not mobile:
+        return ''
+    
+    mobile = mobile.strip().replace('+91', '').replace(' ', '').replace('-', '')
+    
+    message = f"""🎉 *REGISTRATION SUCCESSFUL!* 🎉
+
+━━━━━━━━━━━━━━━━━━━━━
+     ✨ *SANSA LEARN* ✨
+    _Where Learning Shines_
+━━━━━━━━━━━━━━━━━━━━━
+
+Dear *{father_name}*,
+
+We are delighted to welcome *{student_name}* to the SANSA LEARN family! 🌟
+
+📋 *Registration Details:*
+┌─────────────────────────
+│ 👤 Student: {student_name}
+│ 🔢 Admission No: *{admission_no}*
+│ 📚 Class: {class_name}
+└─────────────────────────
+
+📎 *Download Registration Card:*
+{profile_pdf_url}
+
+━━━━━━━━━━━━━━━━━━━━━
+
+📍 *SANSA LEARN*
+Chandmari Road, Kankarbagh
+📞 9153021229 | 7488039012
+
+_Thank you for trusting us with your child's education!_
+
+🙏 *Best Wishes*
+Team SANSA LEARN"""
+    
+    encoded_message = quote(message)
+    whatsapp_url = f"https://wa.me/91{mobile}?text={encoded_message}"
+    
+    return whatsapp_url
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     """Login page"""
@@ -407,14 +451,52 @@ def add_student():
                              float(request.form.get('fee_per_month', 0)),
                              float(request.form.get('discount', 0)))
             
-            flash(f'Student added successfully! Admission Number: {admission_number}', 'success')
-            return redirect(url_for('list_students'))
+            # Redirect to registration success page
+            return redirect(url_for('registration_success', student_id=student_id))
             
         except Exception as e:
             flash(f'Error adding student: {str(e)}', 'error')
             return redirect(url_for('add_student'))
     
     return render_template('add_student.html')
+
+@app.route('/student/<int:student_id>/registration-success')
+@login_required
+def registration_success(student_id):
+    """Show registration success page with WhatsApp button"""
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT * FROM students WHERE id = ?', (student_id,))
+    student = cursor.fetchone()
+    
+    if not student:
+        flash('Student not found', 'error')
+        return redirect(url_for('list_students'))
+    
+    conn.close()
+    
+    # Generate public profile PDF URL
+    token = generate_pdf_token(student['admission_number'])
+    profile_pdf_url = url_for('public_student_profile', 
+                              admission_number=student['admission_number'], 
+                              token=token, 
+                              _external=True)
+    
+    # Build WhatsApp URL for registration success
+    whatsapp_url = build_registration_whatsapp_url(
+        student['mobile1'],
+        student['name'],
+        student['admission_number'],
+        student['father_name'],
+        student['class'] or 'N/A',
+        profile_pdf_url
+    )
+    
+    return render_template('registration_success.html', 
+                          student=student, 
+                          whatsapp_url=whatsapp_url,
+                          profile_pdf_url=profile_pdf_url)
 
 @app.route('/student/<int:student_id>')
 @login_required
@@ -1316,6 +1398,237 @@ def public_receipt(admission_number, fee_id, token):
     
     y -= 70
     c.drawString(50, y, "Management Signature")
+    
+    c.save()
+    
+    return send_file(filepath, as_attachment=True)
+
+@app.route('/public/profile/<admission_number>/<token>')
+def public_student_profile(admission_number, token):
+    """Public route for parents to download student profile PDF without login"""
+    if not verify_pdf_token(admission_number, token):
+        return "Invalid or expired link", 403
+    
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT * FROM students WHERE admission_number = ?', (admission_number,))
+    student = cursor.fetchone()
+    
+    if not student:
+        conn.close()
+        return "Student not found", 404
+    
+    cursor.execute('SELECT * FROM institute_info WHERE id = 1')
+    institute = cursor.fetchone()
+    
+    conn.close()
+    
+    # Generate PDF
+    filename = f"profile_{admission_number}.pdf"
+    filepath = os.path.join(PDF_FOLDER, filename)
+    
+    c = canvas.Canvas(filepath, pagesize=A4)
+    width, height = A4
+    
+    # Add Logo
+    logo_path = 'static/logo/logo.png'
+    if os.path.exists(logo_path):
+        try:
+            logo_width = 70
+            logo_height = 70
+            c.drawImage(logo_path, 50, height - 80, 
+                       width=logo_width, height=logo_height, preserveAspectRatio=True, mask='auto')
+        except:
+            pass
+    
+    # Header
+    c.setFont("Helvetica-Bold", 22)
+    c.drawCentredString(width/2, height - 50, "SANSA LEARN")
+    
+    c.setFont("Helvetica", 10)
+    if institute:
+        c.drawCentredString(width/2, height - 68, institute['address'] or '')
+        c.drawCentredString(width/2, height - 82, f"Contact: {institute['contact']}" if institute['contact'] else '')
+    
+    # Title with decorative line
+    y = height - 110
+    c.setStrokeColorRGB(0.2, 0.4, 0.6)
+    c.setLineWidth(2)
+    c.line(50, y, width - 50, y)
+    
+    c.setFont("Helvetica-Bold", 16)
+    c.setFillColorRGB(0.2, 0.4, 0.6)
+    c.drawCentredString(width/2, y - 25, "STUDENT REGISTRATION CARD")
+    c.setFillColorRGB(0, 0, 0)
+    
+    y -= 35
+    c.setLineWidth(1)
+    c.line(50, y, width - 50, y)
+    
+    # Student Photo on right side
+    photo_x = width - 150
+    photo_y = y - 130
+    photo_width = 100
+    photo_height = 120
+    
+    if student['photo_path'] and os.path.exists(student['photo_path']):
+        try:
+            c.drawImage(student['photo_path'], photo_x, photo_y, 
+                       width=photo_width, height=photo_height, preserveAspectRatio=True)
+            # Border around photo
+            c.rect(photo_x, photo_y, photo_width, photo_height)
+        except:
+            c.rect(photo_x, photo_y, photo_width, photo_height)
+            c.setFont("Helvetica", 8)
+            c.drawCentredString(photo_x + photo_width/2, photo_y + photo_height/2, "Photo")
+    else:
+        c.rect(photo_x, photo_y, photo_width, photo_height)
+        c.setFont("Helvetica", 9)
+        c.drawCentredString(photo_x + photo_width/2, photo_y + photo_height/2, "No Photo")
+    
+    # Student Details - Left side
+    y -= 30
+    left_margin = 60
+    label_x = left_margin
+    value_x = left_margin + 120
+    
+    c.setFont("Helvetica-Bold", 11)
+    c.setFillColorRGB(0.2, 0.4, 0.6)
+    c.drawString(left_margin, y, "STUDENT INFORMATION")
+    c.setFillColorRGB(0, 0, 0)
+    
+    y -= 25
+    details = [
+        ("Admission No:", student['admission_number']),
+        ("Name:", student['name']),
+        ("Father's Name:", student['father_name']),
+        ("Mother's Name:", student['mother_name'] or 'N/A'),
+        ("Date of Birth:", student['dob'] or 'N/A'),
+        ("Gender:", student['gender'] or 'N/A'),
+    ]
+    
+    c.setFont("Helvetica", 10)
+    for label, value in details:
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(label_x, y, label)
+        c.setFont("Helvetica", 10)
+        c.drawString(value_x, y, str(value))
+        y -= 18
+    
+    y -= 15
+    c.setFont("Helvetica-Bold", 11)
+    c.setFillColorRGB(0.2, 0.4, 0.6)
+    c.drawString(left_margin, y, "ACADEMIC DETAILS")
+    c.setFillColorRGB(0, 0, 0)
+    
+    y -= 25
+    academic_details = [
+        ("Class:", student['class'] or 'N/A'),
+        ("Board:", student['board'] or 'N/A'),
+        ("Medium:", student['medium'] or 'N/A'),
+        ("School Name:", student['school_name'] or 'N/A'),
+        ("Admission Date:", student['admission_date'] or 'N/A'),
+    ]
+    
+    for label, value in academic_details:
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(label_x, y, label)
+        c.setFont("Helvetica", 10)
+        # Truncate long values
+        display_value = str(value)[:40] + "..." if len(str(value)) > 40 else str(value)
+        c.drawString(value_x, y, display_value)
+        y -= 18
+    
+    y -= 15
+    c.setFont("Helvetica-Bold", 11)
+    c.setFillColorRGB(0.2, 0.4, 0.6)
+    c.drawString(left_margin, y, "CONTACT INFORMATION")
+    c.setFillColorRGB(0, 0, 0)
+    
+    y -= 25
+    contact_details = [
+        ("Mobile 1:", student['mobile1'] or 'N/A'),
+        ("Mobile 2:", student['mobile2'] or 'N/A'),
+        ("Address:", student['address'] or 'N/A'),
+    ]
+    
+    for label, value in contact_details:
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(label_x, y, label)
+        c.setFont("Helvetica", 10)
+        # Handle multi-line address
+        if label == "Address:" and value and len(value) > 50:
+            lines = [value[i:i+50] for i in range(0, len(value), 50)]
+            c.drawString(value_x, y, lines[0])
+            for line in lines[1:]:
+                y -= 15
+                c.drawString(value_x, y, line)
+        else:
+            c.drawString(value_x, y, str(value))
+        y -= 18
+    
+    y -= 15
+    c.setFont("Helvetica-Bold", 11)
+    c.setFillColorRGB(0.2, 0.4, 0.6)
+    c.drawString(left_margin, y, "FEE DETAILS")
+    c.setFillColorRGB(0, 0, 0)
+    
+    y -= 25
+    fee_per_month = student['fee_per_month'] or 0
+    discount = student['discount'] or 0
+    net_fee = fee_per_month - discount
+    
+    fee_details = [
+        ("Fee Per Month:", f"Rs. {fee_per_month:.2f}"),
+        ("Discount:", f"Rs. {discount:.2f}"),
+        ("Net Fee:", f"Rs. {net_fee:.2f}"),
+    ]
+    
+    for label, value in fee_details:
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(label_x, y, label)
+        c.setFont("Helvetica", 10)
+        c.drawString(value_x, y, str(value))
+        y -= 18
+    
+    if student['other_details']:
+        y -= 10
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(label_x, y, "Other Details:")
+        y -= 15
+        c.setFont("Helvetica", 9)
+        other_text = student['other_details'][:200]
+        c.drawString(label_x + 10, y, other_text)
+    
+    # Footer
+    y = 100
+    c.setStrokeColorRGB(0.2, 0.4, 0.6)
+    c.setLineWidth(1)
+    c.line(50, y, width - 50, y)
+    
+    y -= 20
+    c.setFont("Helvetica", 9)
+    c.drawString(50, y, f"Generated on: {datetime.now().strftime('%d-%m-%Y %H:%M')}")
+    c.drawString(50, y - 15, "For Sansa Learn")
+    
+    # Add Signature Image
+    signature_path = 'static/logo/signature.jpg'
+    if os.path.exists(signature_path):
+        try:
+            sig_width = 120
+            sig_height = 40
+            c.drawImage(signature_path, width - 180, y - 45, width=sig_width, height=sig_height)
+        except:
+            pass
+    
+    c.drawRightString(width - 50, y - 55, "Authorized Signature")
+    
+    # Welcome message at bottom
+    y -= 75
+    c.setFont("Helvetica-Oblique", 10)
+    c.setFillColorRGB(0.3, 0.3, 0.3)
+    c.drawCentredString(width/2, y, "Welcome to SANSA LEARN Family! We wish you success in your learning journey.")
     
     c.save()
     
