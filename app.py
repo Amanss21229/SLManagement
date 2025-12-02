@@ -3,6 +3,9 @@ import sqlite3
 import csv
 import hashlib
 import uuid
+import json
+import zipfile
+import shutil
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from functools import wraps
@@ -34,6 +37,8 @@ DATABASE = 'database.db'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(PDF_FOLDER, exist_ok=True)
 os.makedirs('static/logo', exist_ok=True)
+os.makedirs('backups', exist_ok=True)
+BACKUP_FOLDER = 'backups'
 
 # Authentication decorator
 def login_required(f):
@@ -1896,6 +1901,250 @@ def cleanup_sessions():
     return redirect(url_for('manage_sessions'))
 
 # ============ END SESSION MANAGEMENT ROUTES ============
+
+# ============ BACKUP & RESTORE ROUTES ============
+
+@app.route('/backup')
+@login_required
+def backup_page():
+    """Backup management page"""
+    backup_files = []
+    if os.path.exists(BACKUP_FOLDER):
+        for f in os.listdir(BACKUP_FOLDER):
+            if f.endswith('.zip'):
+                filepath = os.path.join(BACKUP_FOLDER, f)
+                size = os.path.getsize(filepath)
+                modified = datetime.fromtimestamp(os.path.getmtime(filepath))
+                backup_files.append({
+                    'name': f,
+                    'size': f"{size / 1024:.1f} KB" if size < 1024*1024 else f"{size / (1024*1024):.1f} MB",
+                    'date': modified.strftime('%d-%m-%Y %H:%M')
+                })
+    backup_files.sort(key=lambda x: x['date'], reverse=True)
+    
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('SELECT COUNT(*) FROM students')
+    total_students = cursor.fetchone()[0]
+    cursor.execute('SELECT COUNT(*) FROM fees')
+    total_fees = cursor.fetchone()[0]
+    conn.close()
+    
+    return render_template('backup.html', 
+                          backup_files=backup_files,
+                          total_students=total_students,
+                          total_fees=total_fees)
+
+@app.route('/backup/create', methods=['POST'])
+@login_required
+def create_backup():
+    """Create a full backup of database and uploaded files"""
+    try:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        backup_name = f"sansa_learn_backup_{timestamp}"
+        backup_dir = os.path.join(BACKUP_FOLDER, backup_name)
+        os.makedirs(backup_dir, exist_ok=True)
+        
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT * FROM students')
+        students = [dict(row) for row in cursor.fetchall()]
+        
+        cursor.execute('SELECT * FROM fees')
+        fees = [dict(row) for row in cursor.fetchall()]
+        
+        cursor.execute('SELECT * FROM institute_info')
+        institute_info = [dict(row) for row in cursor.fetchall()]
+        
+        cursor.execute('SELECT * FROM manager_sessions')
+        sessions = [dict(row) for row in cursor.fetchall()]
+        
+        conn.close()
+        
+        backup_data = {
+            'backup_date': datetime.now().isoformat(),
+            'backup_version': '1.0',
+            'students': students,
+            'fees': fees,
+            'institute_info': institute_info,
+            'manager_sessions': sessions,
+            'statistics': {
+                'total_students': len(students),
+                'total_fees': len(fees)
+            }
+        }
+        
+        json_path = os.path.join(backup_dir, 'data.json')
+        with open(json_path, 'w', encoding='utf-8') as f:
+            json.dump(backup_data, f, indent=2, ensure_ascii=False, default=str)
+        
+        uploads_backup_dir = os.path.join(backup_dir, 'uploads')
+        if os.path.exists(UPLOAD_FOLDER) and os.listdir(UPLOAD_FOLDER):
+            shutil.copytree(UPLOAD_FOLDER, uploads_backup_dir)
+        else:
+            os.makedirs(uploads_backup_dir, exist_ok=True)
+        
+        logo_backup_dir = os.path.join(backup_dir, 'logo')
+        if os.path.exists('static/logo'):
+            shutil.copytree('static/logo', logo_backup_dir)
+        
+        zip_path = os.path.join(BACKUP_FOLDER, f"{backup_name}.zip")
+        shutil.make_archive(os.path.join(BACKUP_FOLDER, backup_name), 'zip', backup_dir)
+        
+        shutil.rmtree(backup_dir)
+        
+        flash(f'Backup created successfully! File: {backup_name}.zip', 'success')
+        
+    except Exception as e:
+        flash(f'Error creating backup: {str(e)}', 'error')
+    
+    return redirect(url_for('backup_page'))
+
+@app.route('/backup/download/<filename>')
+@login_required
+def download_backup(filename):
+    """Download a backup file"""
+    if not filename.endswith('.zip'):
+        flash('Invalid backup file.', 'error')
+        return redirect(url_for('backup_page'))
+    
+    filepath = os.path.join(BACKUP_FOLDER, secure_filename(filename))
+    if os.path.exists(filepath):
+        return send_file(filepath, as_attachment=True)
+    else:
+        flash('Backup file not found.', 'error')
+        return redirect(url_for('backup_page'))
+
+@app.route('/backup/delete/<filename>', methods=['POST'])
+@login_required
+def delete_backup(filename):
+    """Delete a backup file"""
+    if not filename.endswith('.zip'):
+        flash('Invalid backup file.', 'error')
+        return redirect(url_for('backup_page'))
+    
+    filepath = os.path.join(BACKUP_FOLDER, secure_filename(filename))
+    if os.path.exists(filepath):
+        os.remove(filepath)
+        flash(f'Backup {filename} deleted successfully.', 'success')
+    else:
+        flash('Backup file not found.', 'error')
+    
+    return redirect(url_for('backup_page'))
+
+@app.route('/backup/restore', methods=['POST'])
+@login_required
+def restore_backup():
+    """Restore from an uploaded backup file"""
+    if 'backup_file' not in request.files:
+        flash('No backup file uploaded.', 'error')
+        return redirect(url_for('backup_page'))
+    
+    file = request.files['backup_file']
+    if file.filename == '':
+        flash('No file selected.', 'error')
+        return redirect(url_for('backup_page'))
+    
+    if not file.filename.endswith('.zip'):
+        flash('Please upload a valid backup ZIP file.', 'error')
+        return redirect(url_for('backup_page'))
+    
+    try:
+        temp_dir = os.path.join(BACKUP_FOLDER, 'temp_restore')
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
+        os.makedirs(temp_dir)
+        
+        zip_path = os.path.join(temp_dir, 'backup.zip')
+        file.save(zip_path)
+        
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall(temp_dir)
+        
+        json_path = None
+        for root, dirs, files in os.walk(temp_dir):
+            if 'data.json' in files:
+                json_path = os.path.join(root, 'data.json')
+                restore_root = root
+                break
+        
+        if not json_path:
+            raise Exception('Invalid backup file: data.json not found')
+        
+        with open(json_path, 'r', encoding='utf-8') as f:
+            backup_data = json.load(f)
+        
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        cursor.execute('DELETE FROM fees')
+        cursor.execute('DELETE FROM students')
+        cursor.execute('DELETE FROM manager_sessions')
+        
+        for student in backup_data.get('students', []):
+            cursor.execute('''
+                INSERT INTO students (id, admission_number, photo_path, name, father_name, mother_name,
+                    dob, gender, class, board, medium, school_name, address, mobile1, mobile2,
+                    fee_per_month, discount, admission_date, other_details, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                student.get('id'), student.get('admission_number'), student.get('photo_path'),
+                student.get('name'), student.get('father_name'), student.get('mother_name'),
+                student.get('dob'), student.get('gender'), student.get('class'),
+                student.get('board'), student.get('medium'), student.get('school_name'),
+                student.get('address'), student.get('mobile1'), student.get('mobile2'),
+                student.get('fee_per_month'), student.get('discount'), student.get('admission_date'),
+                student.get('other_details'), student.get('created_at')
+            ))
+        
+        for fee in backup_data.get('fees', []):
+            cursor.execute('''
+                INSERT INTO fees (id, student_id, month, year, fee_amount, is_paid,
+                    payment_date, payment_mode, remarks, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                fee.get('id'), fee.get('student_id'), fee.get('month'), fee.get('year'),
+                fee.get('fee_amount'), fee.get('is_paid'), fee.get('payment_date'),
+                fee.get('payment_mode'), fee.get('remarks'), fee.get('created_at')
+            ))
+        
+        for sess in backup_data.get('manager_sessions', []):
+            cursor.execute('''
+                INSERT INTO manager_sessions (id, session_id, ip_address, user_agent,
+                    device_name, os, browser, is_active, created_at, last_seen_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                sess.get('id'), sess.get('session_id'), sess.get('ip_address'),
+                sess.get('user_agent'), sess.get('device_name'), sess.get('os'),
+                sess.get('browser'), sess.get('is_active'), sess.get('created_at'),
+                sess.get('last_seen_at')
+            ))
+        
+        conn.commit()
+        conn.close()
+        
+        uploads_restore = os.path.join(restore_root, 'uploads')
+        if os.path.exists(uploads_restore):
+            for item in os.listdir(uploads_restore):
+                src = os.path.join(uploads_restore, item)
+                dst = os.path.join(UPLOAD_FOLDER, item)
+                if os.path.isfile(src):
+                    shutil.copy2(src, dst)
+        
+        shutil.rmtree(temp_dir)
+        
+        stats = backup_data.get('statistics', {})
+        flash(f"Backup restored successfully! {stats.get('total_students', 0)} students and {stats.get('total_fees', 0)} fee records restored.", 'success')
+        
+    except Exception as e:
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
+        flash(f'Error restoring backup: {str(e)}', 'error')
+    
+    return redirect(url_for('backup_page'))
+
+# ============ END BACKUP & RESTORE ROUTES ============
 
 if __name__ == '__main__':
     init_db()

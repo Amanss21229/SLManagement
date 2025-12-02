@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+
+{% block title %}Backup & Restore - Sansa Learn{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center">
+            <h2><i class="fas fa-database text-primary"></i> Backup & Restore</h2>
+            <form action="{{ url_for('create_backup') }}" method="POST" class="d-inline">
+                <button type="submit" class="btn btn-success btn-lg">
+                    <i class="fas fa-download"></i> Create New Backup
+                </button>
+            </form>
+        </div>
+        <p class="text-muted mt-2">Safely backup your data and restore it anytime. Download backups to keep them safe on your device.</p>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-6 mb-3">
+        <div class="card border-info h-100">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0"><i class="fas fa-chart-bar"></i> Current Data Summary</h5>
+            </div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-6">
+                        <h3 class="text-primary">{{ total_students }}</h3>
+                        <p class="text-muted mb-0">Total Students</p>
+                    </div>
+                    <div class="col-6">
+                        <h3 class="text-success">{{ total_fees }}</h3>
+                        <p class="text-muted mb-0">Fee Records</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-6 mb-3">
+        <div class="card border-warning h-100">
+            <div class="card-header bg-warning text-dark">
+                <h5 class="mb-0"><i class="fas fa-upload"></i> Restore from Backup</h5>
+            </div>
+            <div class="card-body">
+                <form action="{{ url_for('restore_backup') }}" method="POST" enctype="multipart/form-data" onsubmit="return confirm('WARNING: This will replace ALL current data with the backup data. Are you sure you want to continue?');">
+                    <div class="mb-3">
+                        <label for="backup_file" class="form-label">Upload Backup File (.zip)</label>
+                        <input type="file" class="form-control" id="backup_file" name="backup_file" accept=".zip" required>
+                    </div>
+                    <button type="submit" class="btn btn-warning w-100">
+                        <i class="fas fa-undo"></i> Restore Backup
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="fas fa-archive"></i> Available Backups</h5>
+            </div>
+            <div class="card-body">
+                {% if backup_files %}
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Backup File</th>
+                                <th>Size</th>
+                                <th>Created On</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for backup in backup_files %}
+                            <tr>
+                                <td>
+                                    <i class="fas fa-file-archive text-primary me-2"></i>
+                                    {{ backup.name }}
+                                </td>
+                                <td>{{ backup.size }}</td>
+                                <td>{{ backup.date }}</td>
+                                <td>
+                                    <a href="{{ url_for('download_backup', filename=backup.name) }}" class="btn btn-sm btn-success me-1">
+                                        <i class="fas fa-download"></i> Download
+                                    </a>
+                                    <form action="{{ url_for('delete_backup', filename=backup.name) }}" method="POST" class="d-inline" onsubmit="return confirm('Delete this backup?');">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="text-center text-muted py-5">
+                    <i class="fas fa-folder-open fa-4x mb-3"></i>
+                    <p>No backups found. Click "Create New Backup" to create your first backup.</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="alert alert-info">
+            <h6><i class="fas fa-info-circle"></i> Backup Information</h6>
+            <ul class="mb-0">
+                <li><strong>What's included:</strong> All student data, fee records, uploaded photos, and logo/signature images</li>
+                <li><strong>Recommendation:</strong> Download backups regularly and keep them safe on your phone or computer</li>
+                <li><strong>Restore:</strong> Upload a backup file to restore all data - this will replace current data</li>
+                <li><strong>Safety:</strong> Before restoring, create a new backup of current data first</li>
+            </ul>
+        </div>
+    </div>
+</div>
+{% endblock %}
