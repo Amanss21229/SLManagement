@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+
+{% block title %}Active Sessions - Sansa Learn{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center">
+            <h2><i class="fas fa-shield-alt text-primary"></i> Device & Session Management</h2>
+            <div>
+                <form action="{{ url_for('revoke_all_sessions') }}" method="POST" class="d-inline" onsubmit="return confirm('Are you sure you want to logout all other devices?');">
+                    <button type="submit" class="btn btn-danger">
+                        <i class="fas fa-sign-out-alt"></i> Logout All Other Devices
+                    </button>
+                </form>
+            </div>
+        </div>
+        <p class="text-muted mt-2">Monitor and control all devices that are logged into your account</p>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card border-success">
+            <div class="card-header bg-success text-white">
+                <h5 class="mb-0"><i class="fas fa-laptop"></i> Active Sessions ({{ active_sessions|length }})</h5>
+            </div>
+            <div class="card-body">
+                {% if active_sessions %}
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Device</th>
+                                <th>Browser</th>
+                                <th>Operating System</th>
+                                <th>IP Address</th>
+                                <th>Login Time</th>
+                                <th>Last Active</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for sess in active_sessions %}
+                            <tr class="{% if sess['session_id'] == current_session_id %}table-primary{% endif %}">
+                                <td>
+                                    <i class="fas fa-{% if 'Mobile' in sess['device_name'] or 'iPhone' in sess['device_name'] or 'Android' in sess['device_name'] %}mobile-alt{% else %}desktop{% endif %} me-2"></i>
+                                    {{ sess['device_name'] or 'Unknown' }}
+                                    {% if sess['session_id'] == current_session_id %}
+                                    <span class="badge bg-primary ms-2">This Device</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ sess['browser'] or 'Unknown' }}</td>
+                                <td>{{ sess['os'] or 'Unknown' }}</td>
+                                <td><code>{{ sess['ip_address'] or 'Unknown' }}</code></td>
+                                <td>{{ sess['created_at'][:16] if sess['created_at'] else 'Unknown' }}</td>
+                                <td>{{ sess['last_seen_at'][:16] if sess['last_seen_at'] else 'Unknown' }}</td>
+                                <td>
+                                    {% if sess['session_id'] != current_session_id %}
+                                    <form action="{{ url_for('revoke_session', session_id=sess['id']) }}" method="POST" class="d-inline" onsubmit="return confirm('Are you sure you want to logout this device?');">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger">
+                                            <i class="fas fa-times"></i> Logout
+                                        </button>
+                                    </form>
+                                    {% else %}
+                                    <span class="text-muted">Current Session</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="text-center text-muted py-4">
+                    <i class="fas fa-laptop fa-3x mb-3"></i>
+                    <p>No active sessions found.</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if inactive_sessions %}
+<div class="row">
+    <div class="col-12">
+        <div class="card border-secondary">
+            <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="fas fa-history"></i> Recent Logout History</h5>
+                <form action="{{ url_for('cleanup_sessions') }}" method="POST" class="d-inline">
+                    <button type="submit" class="btn btn-sm btn-light">
+                        <i class="fas fa-broom"></i> Clean Old Sessions
+                    </button>
+                </form>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Device</th>
+                                <th>Browser</th>
+                                <th>OS</th>
+                                <th>IP Address</th>
+                                <th>Last Seen</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for sess in inactive_sessions %}
+                            <tr class="text-muted">
+                                <td>
+                                    <i class="fas fa-{% if 'Mobile' in sess['device_name'] or 'iPhone' in sess['device_name'] or 'Android' in sess['device_name'] %}mobile-alt{% else %}desktop{% endif %} me-2"></i>
+                                    {{ sess['device_name'] or 'Unknown' }}
+                                </td>
+                                <td>{{ sess['browser'] or 'Unknown' }}</td>
+                                <td>{{ sess['os'] or 'Unknown' }}</td>
+                                <td><code>{{ sess['ip_address'] or 'Unknown' }}</code></td>
+                                <td>{{ sess['last_seen_at'][:16] if sess['last_seen_at'] else 'Unknown' }}</td>
+                                <td><span class="badge bg-secondary">Logged Out</span></td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="alert alert-info">
+            <h6><i class="fas fa-info-circle"></i> About Session Management</h6>
+            <ul class="mb-0">
+                <li>Sessions are created when you login from any device</li>
+                <li>You can see all devices currently logged into your account</li>
+                <li>Use "Logout" to remotely disconnect any suspicious device</li>
+                <li>Use "Logout All Other Devices" if you suspect unauthorized access</li>
+                <li>Sessions marked with "This Device" indicate your current browser</li>
+            </ul>
+        </div>
+    </div>
+</div>
+{% endblock %}

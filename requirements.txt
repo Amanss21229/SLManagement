@@ -34,3 +34,4 @@ psycopg2-binary
 python-dateutil
 reportlab
 werkzeug
+user-agents

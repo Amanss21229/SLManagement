@@ -2,6 +2,7 @@ import os
 import sqlite3
 import csv
 import hashlib
+import uuid
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from functools import wraps
@@ -13,6 +14,7 @@ from reportlab.lib.units import inch
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
 from PIL import Image
+from user_agents import parse as parse_user_agent
 import io
 
 app = Flask(__name__)
@@ -130,6 +132,22 @@ def init_db():
             INSERT INTO institute_info (id, address, contact) 
             VALUES (1, 'Chandmari Road Kankarbagh gali no. 06 ke thik saamne', '9296820840, 9153021229')
         ''')
+    
+    # Manager sessions table for device tracking
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS manager_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT UNIQUE NOT NULL,
+            ip_address TEXT,
+            user_agent TEXT,
+            device_name TEXT,
+            os TEXT,
+            browser TEXT,
+            is_active INTEGER DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
     
     conn.commit()
     conn.close()
@@ -294,6 +312,59 @@ Team SANSA LEARN"""
     
     return whatsapp_url
 
+def get_client_ip():
+    """Get client IP address"""
+    forwarded_for = request.headers.get('X-Forwarded-For')
+    if forwarded_for:
+        return forwarded_for.split(',')[0].strip()
+    return request.remote_addr or 'Unknown'
+
+def create_session_record():
+    """Create a session record with device info"""
+    session_id = str(uuid.uuid4())
+    user_agent_string = request.headers.get('User-Agent', '')
+    user_agent = parse_user_agent(user_agent_string)
+    
+    device_name = str(user_agent.device.family) if user_agent.device.family else 'Unknown Device'
+    os_name = f"{user_agent.os.family} {user_agent.os.version_string}".strip()
+    browser_name = f"{user_agent.browser.family} {user_agent.browser.version_string}".strip()
+    ip_address = get_client_ip()
+    
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO manager_sessions (session_id, ip_address, user_agent, device_name, os, browser)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (session_id, ip_address, user_agent_string, device_name, os_name, browser_name))
+    conn.commit()
+    conn.close()
+    
+    return session_id
+
+@app.before_request
+def check_session_validity():
+    """Check if current session is still valid (not revoked)"""
+    if session.get('authenticated') and session.get('session_record_id'):
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT is_active FROM manager_sessions WHERE session_id = ?
+        ''', (session.get('session_record_id'),))
+        result = cursor.fetchone()
+        
+        if result and result['is_active'] == 1:
+            cursor.execute('''
+                UPDATE manager_sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE session_id = ?
+            ''', (session.get('session_record_id'),))
+            conn.commit()
+        elif result and result['is_active'] == 0:
+            conn.close()
+            session.clear()
+            flash('Your session was terminated by the administrator.', 'warning')
+            return redirect(url_for('login'))
+        
+        conn.close()
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     """Login page"""
@@ -309,7 +380,9 @@ def login():
             return render_template('login.html')
         
         if password == admin_password:
+            session_id = create_session_record()
             session['authenticated'] = True
+            session['session_record_id'] = session_id
             session.permanent = True
             flash('Login successful!', 'success')
             return redirect(url_for('dashboard'))
@@ -321,6 +394,14 @@ def login():
 @app.route('/logout')
 def logout():
     """Logout and clear session"""
+    if session.get('session_record_id'):
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('''
+            UPDATE manager_sessions SET is_active = 0 WHERE session_id = ?
+        ''', (session.get('session_record_id'),))
+        conn.commit()
+        conn.close()
     session.clear()
     flash('You have been logged out successfully.', 'success')
     return redirect(url_for('login'))
@@ -1711,6 +1792,110 @@ def export_fees():
             ])
     
     return send_file(filepath, as_attachment=True)
+
+# ============ SESSION MANAGEMENT ROUTES ============
+
+@app.route('/sessions')
+@login_required
+def manage_sessions():
+    """View all active sessions"""
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT * FROM manager_sessions 
+        WHERE is_active = 1
+        ORDER BY last_seen_at DESC
+    ''')
+    active_sessions = cursor.fetchall()
+    
+    cursor.execute('''
+        SELECT * FROM manager_sessions 
+        WHERE is_active = 0
+        ORDER BY last_seen_at DESC
+        LIMIT 10
+    ''')
+    inactive_sessions = cursor.fetchall()
+    
+    conn.close()
+    
+    current_session_id = session.get('session_record_id')
+    
+    return render_template('sessions.html', 
+                          active_sessions=active_sessions,
+                          inactive_sessions=inactive_sessions,
+                          current_session_id=current_session_id)
+
+@app.route('/sessions/revoke/<int:session_id>', methods=['POST'])
+@login_required
+def revoke_session(session_id):
+    """Revoke a specific session"""
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT session_id, is_active FROM manager_sessions WHERE id = ?', (session_id,))
+    result = cursor.fetchone()
+    
+    if result:
+        target_session_id = result['session_id']
+        current_session_id = session.get('session_record_id')
+        
+        if result['is_active'] == 0:
+            flash('Session is already logged out.', 'info')
+        elif target_session_id == current_session_id:
+            flash('You cannot revoke your own current session.', 'warning')
+        else:
+            cursor.execute('''
+                UPDATE manager_sessions SET is_active = 0 WHERE id = ? AND is_active = 1
+            ''', (session_id,))
+            if cursor.rowcount > 0:
+                conn.commit()
+                flash('Session has been revoked successfully. That device will be logged out.', 'success')
+            else:
+                flash('Could not revoke session.', 'error')
+    else:
+        flash('Session not found.', 'error')
+    
+    conn.close()
+    return redirect(url_for('manage_sessions'))
+
+@app.route('/sessions/revoke-all', methods=['POST'])
+@login_required
+def revoke_all_sessions():
+    """Revoke all sessions except current one"""
+    current_session_id = session.get('session_record_id')
+    
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('''
+        UPDATE manager_sessions SET is_active = 0 
+        WHERE session_id != ? AND is_active = 1
+    ''', (current_session_id,))
+    revoked_count = cursor.rowcount
+    conn.commit()
+    conn.close()
+    
+    flash(f'{revoked_count} session(s) have been revoked. All other devices will be logged out.', 'success')
+    return redirect(url_for('manage_sessions'))
+
+@app.route('/sessions/cleanup', methods=['POST'])
+@login_required
+def cleanup_sessions():
+    """Delete old inactive sessions"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('''
+        DELETE FROM manager_sessions 
+        WHERE is_active = 0 AND datetime(last_seen_at) < datetime('now', '-30 days')
+    ''')
+    deleted_count = cursor.rowcount
+    conn.commit()
+    conn.close()
+    
+    flash(f'{deleted_count} old session(s) have been cleaned up.', 'success')
+    return redirect(url_for('manage_sessions'))
+
+# ============ END SESSION MANAGEMENT ROUTES ============
 
 if __name__ == '__main__':
     init_db()
