@@ -35,3 +35,8 @@ python-dateutil
 reportlab
 werkzeug
 user-agents
+email_validator
+flask
+flask-sqlalchemy
+gunicorn
+psycopg2-binary
