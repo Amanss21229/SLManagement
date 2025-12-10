@@ -52,7 +52,7 @@ The project is pre-configured for Replit. Simply click "Run" to start the applic
 
 - **Name**: Sansa Learn
 - **Address**: Chandmari Road Kankarbagh gali no. 06 ke thik saamne
-- **Contact**: 9153021229, 7488039012
+- **Contact**: 9296820840, 9153021229
 
 ## Database Structure
 
