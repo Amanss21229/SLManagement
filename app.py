@@ -286,7 +286,7 @@ We are delighted to welcome *{student_name}* to the SANSA LEARN family! 🌟
 
 📍 *SANSA LEARN*
 Chandmari Road, Kankarbagh
-📞 9153021229 | 7488039012
+📞 9296820840 | 9153021229
 
 _Thank you for trusting us with your child's education!_
 
