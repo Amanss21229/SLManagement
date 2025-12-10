@@ -608,14 +608,16 @@ def edit_student(student_id):
     if request.method == 'POST':
         try:
             cursor.execute('SELECT photo_path FROM students WHERE id = %s', (student_id,))
-            current_photo = cursor.fetchone()[0]
+            result = cursor.fetchone()
+            current_photo = result['photo_path'] if result else None
             photo_path = current_photo
             
             if 'photo' in request.files:
                 file = request.files['photo']
                 if file and file.filename and allowed_file(file.filename):
                     cursor.execute('SELECT admission_number FROM students WHERE id = %s', (student_id,))
-                    admission_number = cursor.fetchone()[0]
+                    result = cursor.fetchone()
+                    admission_number = result['admission_number'] if result else None
                     filename = secure_filename(f"{admission_number}_{file.filename}")
                     filepath = os.path.join(UPLOAD_FOLDER, filename)
                     file.save(filepath)

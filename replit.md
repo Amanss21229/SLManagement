@@ -1,14 +1,14 @@
 # Sansa Learn Student Management System
 
 ## Project Overview
-A complete full-stack web application for student data management and monthly fee tracking for Sansa Learn coaching institute. Built with Python Flask, SQLite database, and responsive Bootstrap UI.
+A complete full-stack web application for student data management and monthly fee tracking for Sansa Learn coaching institute. Built with Python Flask, PostgreSQL database (NeonDB), and responsive Bootstrap UI.
 
 ## Purpose
 Manage student records, track monthly fee payments, generate PDF receipts and demand bills with institute branding.
 
 ## Tech Stack
 - Backend: Python 3.11 + Flask
-- Database: SQLite3
+- Database: PostgreSQL (NeonDB - Replit integrated)
 - PDF Generation: ReportLab
 - Image Processing: Pillow
 - Frontend: Bootstrap 5, HTML/CSS/JS
@@ -17,7 +17,6 @@ Manage student records, track monthly fee payments, generate PDF receipts and de
 ```
 /
 ├── app.py                 # Main Flask application
-├── database.db           # SQLite database (auto-created)
 ├── static/
 │   ├── css/
 │   │   └── style.css     # Custom styles
@@ -82,7 +81,10 @@ Manage student records, track monthly fee payments, generate PDF receipts and de
 ## User Preferences
 - Single admin user (coaching institute owner)
 - Simple, clean, mobile-friendly UI
-- All data stored locally in SQLite
+- All data stored in PostgreSQL (NeonDB) for persistence across deployments
+
+## Recent Changes
+- 2025-12-10: Migrated database from SQLite to PostgreSQL (NeonDB) for persistent data storage across redeployments and cache clears
 
 ## Running the Application
 The app runs on port 5000. Access via the Replit webview.
