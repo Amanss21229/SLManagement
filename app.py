@@ -1,5 +1,6 @@
 import os
-import sqlite3
+import psycopg2
+import psycopg2.extras
 import csv
 import hashlib
 import uuid
@@ -22,25 +23,21 @@ import io
 
 app = Flask(__name__)
 
-# Security: Require SESSION_SECRET from environment
 if not os.environ.get('SESSION_SECRET'):
     raise RuntimeError("SESSION_SECRET environment variable must be set for security. Please add it to Replit Secrets.")
 app.secret_key = os.environ.get('SESSION_SECRET')
 
-# Configuration
 UPLOAD_FOLDER = 'uploads'
 PDF_FOLDER = 'pdfs'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
-DATABASE = 'database.db'
+DATABASE_URL = os.environ.get('DATABASE_URL')
 
-# Ensure folders exist
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(PDF_FOLDER, exist_ok=True)
 os.makedirs('static/logo', exist_ok=True)
 os.makedirs('backups', exist_ok=True)
 BACKUP_FOLDER = 'backups'
 
-# Authentication decorator
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -51,13 +48,11 @@ def login_required(f):
     return decorated_function
 
 def generate_pdf_token(admission_number):
-    """Generate a secure token for public PDF access"""
     secret = os.environ.get('SESSION_SECRET', 'default')
     data = f"{admission_number}-{secret}"
     return hashlib.sha256(data.encode()).hexdigest()[:16]
 
 def verify_pdf_token(admission_number, token):
-    """Verify the PDF access token"""
     expected_token = generate_pdf_token(admission_number)
     return token == expected_token
 
@@ -65,20 +60,16 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def get_db():
-    """Connect to the database"""
-    conn = sqlite3.connect(DATABASE)
-    conn.row_factory = sqlite3.Row
+    conn = psycopg2.connect(DATABASE_URL)
     return conn
 
 def init_db():
-    """Initialize the database with tables"""
     conn = get_db()
     cursor = conn.cursor()
     
-    # Students table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS students (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             admission_number TEXT UNIQUE NOT NULL,
             photo_path TEXT,
             name TEXT NOT NULL,
@@ -101,10 +92,9 @@ def init_db():
         )
     ''')
     
-    # Fees table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS fees (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             student_id INTEGER NOT NULL,
             month INTEGER NOT NULL,
             year INTEGER NOT NULL,
@@ -119,7 +109,6 @@ def init_db():
         )
     ''')
     
-    # Institute info table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS institute_info (
             id INTEGER PRIMARY KEY,
@@ -130,7 +119,6 @@ def init_db():
         )
     ''')
     
-    # Insert default institute info if not exists
     cursor.execute('SELECT COUNT(*) FROM institute_info')
     if cursor.fetchone()[0] == 0:
         cursor.execute('''
@@ -138,10 +126,9 @@ def init_db():
             VALUES (1, 'Chandmari Road Kankarbagh gali no. 06 ke thik saamne', '9296820840, 9153021229')
         ''')
     
-    # Manager sessions table for device tracking
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS manager_sessions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             session_id TEXT UNIQUE NOT NULL,
             ip_address TEXT,
             user_agent TEXT,
@@ -157,21 +144,18 @@ def init_db():
     conn.commit()
     conn.close()
 
-# Initialize database when module loads
 init_db()
 
 def generate_admission_number():
-    """Generate unique admission number"""
     conn = get_db()
     cursor = conn.cursor()
     year = datetime.now().year
-    cursor.execute('SELECT COUNT(*) FROM students WHERE admission_number LIKE ?', (f'SL{year}%',))
+    cursor.execute('SELECT COUNT(*) FROM students WHERE admission_number LIKE %s', (f'SL{year}%',))
     count = cursor.fetchone()[0]
     conn.close()
     return f'SL{year}{str(count + 1).zfill(4)}'
 
 def ensure_fee_records(student_id, admission_date, fee_per_month, discount=0.0):
-    """Auto-generate fee records from admission date to current month"""
     if not admission_date:
         return
     
@@ -193,13 +177,13 @@ def ensure_fee_records(student_id, admission_date, fee_per_month, discount=0.0):
         year = temp_dt.year
         
         cursor.execute('''
-            SELECT id FROM fees WHERE student_id = ? AND month = ? AND year = ?
+            SELECT id FROM fees WHERE student_id = %s AND month = %s AND year = %s
         ''', (student_id, month, year))
         
         if not cursor.fetchone():
             cursor.execute('''
                 INSERT INTO fees (student_id, month, year, fee_amount, is_paid)
-                VALUES (?, ?, ?, ?, 0)
+                VALUES (%s, %s, %s, %s, 0)
             ''', (student_id, month, year, net_fee))
         
         temp_dt = temp_dt.replace(day=1) + relativedelta(months=1)
@@ -208,13 +192,12 @@ def ensure_fee_records(student_id, admission_date, fee_per_month, discount=0.0):
     conn.close()
 
 def get_unpaid_months_details(student_id):
-    """Get details of all unpaid months for a student"""
     conn = get_db()
-    cursor = conn.cursor()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
     cursor.execute('''
         SELECT month, year, fee_amount FROM fees 
-        WHERE student_id = ? AND is_paid = 0
+        WHERE student_id = %s AND is_paid = 0
         ORDER BY year, month
     ''', (student_id,))
     
@@ -237,7 +220,6 @@ def get_unpaid_months_details(student_id):
     return unpaid_list, total_due
 
 def build_whatsapp_url(mobile, student_name, admission_no, unpaid_list, total_due, demand_bill_url=''):
-    """Build WhatsApp URL with encoded message"""
     if not mobile:
         return ''
     
@@ -274,7 +256,6 @@ Admission No: {admission_no}
     return whatsapp_url
 
 def build_registration_whatsapp_url(mobile, student_name, admission_no, father_name, class_name, profile_pdf_url):
-    """Build WhatsApp URL for registration success message"""
     if not mobile:
         return ''
     
@@ -318,14 +299,12 @@ Team SANSA LEARN"""
     return whatsapp_url
 
 def get_client_ip():
-    """Get client IP address"""
     forwarded_for = request.headers.get('X-Forwarded-For')
     if forwarded_for:
         return forwarded_for.split(',')[0].strip()
     return request.remote_addr or 'Unknown'
 
 def create_session_record():
-    """Create a session record with device info"""
     session_id = str(uuid.uuid4())
     user_agent_string = request.headers.get('User-Agent', '')
     user_agent = parse_user_agent(user_agent_string)
@@ -339,7 +318,7 @@ def create_session_record():
     cursor = conn.cursor()
     cursor.execute('''
         INSERT INTO manager_sessions (session_id, ip_address, user_agent, device_name, os, browser)
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s)
     ''', (session_id, ip_address, user_agent_string, device_name, os_name, browser_name))
     conn.commit()
     conn.close()
@@ -348,18 +327,17 @@ def create_session_record():
 
 @app.before_request
 def check_session_validity():
-    """Check if current session is still valid (not revoked)"""
     if session.get('authenticated') and session.get('session_record_id'):
         conn = get_db()
-        cursor = conn.cursor()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         cursor.execute('''
-            SELECT is_active FROM manager_sessions WHERE session_id = ?
+            SELECT is_active FROM manager_sessions WHERE session_id = %s
         ''', (session.get('session_record_id'),))
         result = cursor.fetchone()
         
         if result and result['is_active'] == 1:
             cursor.execute('''
-                UPDATE manager_sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE session_id = ?
+                UPDATE manager_sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE session_id = %s
             ''', (session.get('session_record_id'),))
             conn.commit()
         elif result and result['is_active'] == 0:
@@ -372,7 +350,6 @@ def check_session_validity():
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    """Login page"""
     if session.get('authenticated'):
         return redirect(url_for('dashboard'))
     
@@ -398,12 +375,11 @@ def login():
 
 @app.route('/logout')
 def logout():
-    """Logout and clear session"""
     if session.get('session_record_id'):
         conn = get_db()
         cursor = conn.cursor()
         cursor.execute('''
-            UPDATE manager_sessions SET is_active = 0 WHERE session_id = ?
+            UPDATE manager_sessions SET is_active = 0 WHERE session_id = %s
         ''', (session.get('session_record_id'),))
         conn.commit()
         conn.close()
@@ -414,11 +390,9 @@ def logout():
 @app.route('/')
 @login_required
 def dashboard():
-    """Main dashboard"""
     conn = get_db()
     cursor = conn.cursor()
     
-    # Get statistics
     cursor.execute('SELECT COUNT(*) FROM students')
     total_students = cursor.fetchone()[0]
     
@@ -427,14 +401,14 @@ def dashboard():
     
     cursor.execute('''
         SELECT COALESCE(SUM(fee_amount), 0) FROM fees 
-        WHERE month = ? AND year = ? AND is_paid = 1
+        WHERE month = %s AND year = %s AND is_paid = 1
     ''', (current_month, current_year))
     total_paid_this_month = cursor.fetchone()[0]
     
     cursor.execute('''
         SELECT COALESCE(SUM(f.fee_amount), 0) FROM fees f
         JOIN students s ON f.student_id = s.id
-        WHERE f.month = ? AND f.year = ? AND f.is_paid = 0
+        WHERE f.month = %s AND f.year = %s AND f.is_paid = 0
     ''', (current_month, current_year))
     total_pending_this_month = cursor.fetchone()[0]
     
@@ -448,28 +422,26 @@ def dashboard():
 @app.route('/uploads/<filename>')
 @login_required
 def uploaded_file(filename):
-    """Serve uploaded student photos"""
     return send_from_directory(UPLOAD_FOLDER, filename)
 
 @app.route('/students')
 @login_required
 def list_students():
-    """List all students"""
     search_query = request.args.get('search', '')
     search_type = request.args.get('search_type', 'name')
     
     conn = get_db()
-    cursor = conn.cursor()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
     if search_query:
         if search_type == 'admission':
-            cursor.execute('SELECT * FROM students WHERE admission_number LIKE ? ORDER BY created_at DESC', 
+            cursor.execute('SELECT * FROM students WHERE admission_number ILIKE %s ORDER BY created_at DESC', 
                          (f'%{search_query}%',))
         elif search_type == 'father':
-            cursor.execute('SELECT * FROM students WHERE father_name LIKE ? ORDER BY created_at DESC', 
+            cursor.execute('SELECT * FROM students WHERE father_name ILIKE %s ORDER BY created_at DESC', 
                          (f'%{search_query}%',))
-        else:  # name
-            cursor.execute('SELECT * FROM students WHERE name LIKE ? ORDER BY created_at DESC', 
+        else:
+            cursor.execute('SELECT * FROM students WHERE name ILIKE %s ORDER BY created_at DESC', 
                          (f'%{search_query}%',))
     else:
         cursor.execute('SELECT * FROM students ORDER BY created_at DESC')
@@ -483,13 +455,10 @@ def list_students():
 @app.route('/student/add', methods=['GET', 'POST'])
 @login_required
 def add_student():
-    """Add new student"""
     if request.method == 'POST':
         try:
-            # Generate admission number
             admission_number = generate_admission_number()
             
-            # Handle photo upload
             photo_path = None
             if 'photo' in request.files:
                 file = request.files['photo']
@@ -507,7 +476,8 @@ def add_student():
                     admission_number, photo_path, name, father_name, mother_name,
                     dob, gender, class, board, medium, school_name, address,
                     mobile1, mobile2, fee_per_month, discount, admission_date, other_details
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
             ''', (
                 admission_number,
                 photo_path,
@@ -529,7 +499,7 @@ def add_student():
                 request.form.get('other_details', '')
             ))
             
-            student_id = cursor.lastrowid
+            student_id = cursor.fetchone()[0]
             conn.commit()
             conn.close()
             
@@ -537,7 +507,6 @@ def add_student():
                              float(request.form.get('fee_per_month', 0)),
                              float(request.form.get('discount', 0)))
             
-            # Redirect to registration success page
             return redirect(url_for('registration_success', student_id=student_id))
             
         except Exception as e:
@@ -549,11 +518,10 @@ def add_student():
 @app.route('/student/<int:student_id>/registration-success')
 @login_required
 def registration_success(student_id):
-    """Show registration success page with WhatsApp button"""
     conn = get_db()
-    cursor = conn.cursor()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
-    cursor.execute('SELECT * FROM students WHERE id = ?', (student_id,))
+    cursor.execute('SELECT * FROM students WHERE id = %s', (student_id,))
     student = cursor.fetchone()
     
     if not student:
@@ -562,14 +530,12 @@ def registration_success(student_id):
     
     conn.close()
     
-    # Generate public profile PDF URL
     token = generate_pdf_token(student['admission_number'])
     profile_pdf_url = url_for('public_student_profile', 
                               admission_number=student['admission_number'], 
                               token=token, 
                               _external=True)
     
-    # Build WhatsApp URL for registration success
     whatsapp_url = build_registration_whatsapp_url(
         student['mobile1'],
         student['name'],
@@ -587,11 +553,10 @@ def registration_success(student_id):
 @app.route('/student/<int:student_id>')
 @login_required
 def view_student(student_id):
-    """View student profile"""
     conn = get_db()
-    cursor = conn.cursor()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
-    cursor.execute('SELECT * FROM students WHERE id = ?', (student_id,))
+    cursor.execute('SELECT * FROM students WHERE id = %s', (student_id,))
     student = cursor.fetchone()
     
     if not student:
@@ -602,7 +567,7 @@ def view_student(student_id):
                       student['fee_per_month'] or 0, student['discount'] or 0)
     
     cursor.execute('''
-        SELECT * FROM fees WHERE student_id = ? ORDER BY year, month
+        SELECT * FROM fees WHERE student_id = %s ORDER BY year, month
     ''', (student_id,))
     all_fee_records = cursor.fetchall()
     
@@ -611,7 +576,6 @@ def view_student(student_id):
     
     unpaid_list, total_due = get_unpaid_months_details(student_id)
     
-    # Generate public demand bill URL (no login required)
     token = generate_pdf_token(student['admission_number'])
     demand_bill_url = url_for('public_demand_bill', 
                               admission_number=student['admission_number'], 
@@ -638,21 +602,19 @@ def view_student(student_id):
 @app.route('/student/<int:student_id>/edit', methods=['GET', 'POST'])
 @login_required
 def edit_student(student_id):
-    """Edit student details"""
     conn = get_db()
-    cursor = conn.cursor()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
     if request.method == 'POST':
         try:
-            # Handle photo upload
-            cursor.execute('SELECT photo_path FROM students WHERE id = ?', (student_id,))
+            cursor.execute('SELECT photo_path FROM students WHERE id = %s', (student_id,))
             current_photo = cursor.fetchone()[0]
             photo_path = current_photo
             
             if 'photo' in request.files:
                 file = request.files['photo']
                 if file and file.filename and allowed_file(file.filename):
-                    cursor.execute('SELECT admission_number FROM students WHERE id = ?', (student_id,))
+                    cursor.execute('SELECT admission_number FROM students WHERE id = %s', (student_id,))
                     admission_number = cursor.fetchone()[0]
                     filename = secure_filename(f"{admission_number}_{file.filename}")
                     filepath = os.path.join(UPLOAD_FOLDER, filename)
@@ -661,11 +623,11 @@ def edit_student(student_id):
             
             cursor.execute('''
                 UPDATE students SET
-                    photo_path = ?, name = ?, father_name = ?, mother_name = ?,
-                    dob = ?, gender = ?, class = ?, board = ?, medium = ?,
-                    school_name = ?, address = ?, mobile1 = ?, mobile2 = ?,
-                    fee_per_month = ?, discount = ?, admission_date = ?, other_details = ?
-                WHERE id = ?
+                    photo_path = %s, name = %s, father_name = %s, mother_name = %s,
+                    dob = %s, gender = %s, class = %s, board = %s, medium = %s,
+                    school_name = %s, address = %s, mobile1 = %s, mobile2 = %s,
+                    fee_per_month = %s, discount = %s, admission_date = %s, other_details = %s
+                WHERE id = %s
             ''', (
                 photo_path,
                 request.form['name'],
@@ -696,7 +658,7 @@ def edit_student(student_id):
         finally:
             conn.close()
     
-    cursor.execute('SELECT * FROM students WHERE id = ?', (student_id,))
+    cursor.execute('SELECT * FROM students WHERE id = %s', (student_id,))
     student = cursor.fetchone()
     conn.close()
     
@@ -709,18 +671,16 @@ def edit_student(student_id):
 @app.route('/student/<int:student_id>/delete', methods=['POST'])
 @login_required
 def delete_student(student_id):
-    """Delete student"""
     try:
         conn = get_db()
         cursor = conn.cursor()
         
-        # Get student photo to delete file
-        cursor.execute('SELECT photo_path FROM students WHERE id = ?', (student_id,))
+        cursor.execute('SELECT photo_path FROM students WHERE id = %s', (student_id,))
         result = cursor.fetchone()
         if result and result[0] and os.path.exists(result[0]):
             os.remove(result[0])
         
-        cursor.execute('DELETE FROM students WHERE id = ?', (student_id,))
+        cursor.execute('DELETE FROM students WHERE id = %s', (student_id,))
         conn.commit()
         conn.close()
         
@@ -733,9 +693,8 @@ def delete_student(student_id):
 @app.route('/fees')
 @login_required
 def fee_management():
-    """Fee management page"""
     conn = get_db()
-    cursor = conn.cursor()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
     cursor.execute('''
         SELECT s.id, s.admission_number, s.name, s.father_name, s.fee_per_month, s.discount
@@ -750,33 +709,30 @@ def fee_management():
 @app.route('/student/<int:student_id>/fees')
 @login_required
 def student_fees(student_id):
-    """Manage fees for a specific student"""
     conn = get_db()
-    cursor = conn.cursor()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
-    cursor.execute('SELECT * FROM students WHERE id = ?', (student_id,))
+    cursor.execute('SELECT * FROM students WHERE id = %s', (student_id,))
     student = cursor.fetchone()
     
     if not student:
         flash('Student not found', 'error')
         return redirect(url_for('fee_management'))
     
-    # Get all fee records
     cursor.execute('''
-        SELECT * FROM fees WHERE student_id = ? ORDER BY year DESC, month DESC
+        SELECT * FROM fees WHERE student_id = %s ORDER BY year DESC, month DESC
     ''', (student_id,))
     fee_records = cursor.fetchall()
     
-    # Calculate statistics
     cursor.execute('''
         SELECT COALESCE(SUM(fee_amount), 0) FROM fees 
-        WHERE student_id = ? AND is_paid = 1
+        WHERE student_id = %s AND is_paid = 1
     ''', (student_id,))
     total_paid = cursor.fetchone()[0]
     
     cursor.execute('''
         SELECT COALESCE(SUM(fee_amount), 0) FROM fees 
-        WHERE student_id = ? AND is_paid = 0
+        WHERE student_id = %s AND is_paid = 0
     ''', (student_id,))
     total_pending = cursor.fetchone()[0]
     
@@ -792,7 +748,6 @@ def student_fees(student_id):
 @app.route('/student/<int:student_id>/fees/add', methods=['POST'])
 @login_required
 def add_fee_record(student_id):
-    """Add or mark fee as paid"""
     try:
         month = int(request.form['month'])
         year = int(request.form['year'])
@@ -805,24 +760,21 @@ def add_fee_record(student_id):
         conn = get_db()
         cursor = conn.cursor()
         
-        # Check if record exists
         cursor.execute('''
-            SELECT id FROM fees WHERE student_id = ? AND month = ? AND year = ?
+            SELECT id FROM fees WHERE student_id = %s AND month = %s AND year = %s
         ''', (student_id, month, year))
         existing = cursor.fetchone()
         
         if existing:
-            # Update existing record
             cursor.execute('''
-                UPDATE fees SET fee_amount = ?, is_paid = ?, payment_date = ?,
-                payment_mode = ?, remarks = ? WHERE id = ?
+                UPDATE fees SET fee_amount = %s, is_paid = %s, payment_date = %s,
+                payment_mode = %s, remarks = %s WHERE id = %s
             ''', (fee_amount, is_paid, payment_date, payment_mode, remarks, existing[0]))
         else:
-            # Insert new record
             cursor.execute('''
                 INSERT INTO fees (student_id, month, year, fee_amount, is_paid, 
                                 payment_date, payment_mode, remarks)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             ''', (student_id, month, year, fee_amount, is_paid, 
                   payment_date, payment_mode, remarks))
         
@@ -838,17 +790,15 @@ def add_fee_record(student_id):
 @app.route('/fees/<int:fee_id>/delete', methods=['POST'])
 @login_required
 def delete_fee_record(fee_id):
-    """Delete fee record"""
     try:
         conn = get_db()
         cursor = conn.cursor()
         
-        # Get student_id before deleting
-        cursor.execute('SELECT student_id FROM fees WHERE id = ?', (fee_id,))
+        cursor.execute('SELECT student_id FROM fees WHERE id = %s', (fee_id,))
         result = cursor.fetchone()
         student_id = result[0] if result else None
         
-        cursor.execute('DELETE FROM fees WHERE id = ?', (fee_id,))
+        cursor.execute('DELETE FROM fees WHERE id = %s', (fee_id,))
         conn.commit()
         conn.close()
         
@@ -864,13 +814,12 @@ def delete_fee_record(fee_id):
 @app.route('/student/<int:student_id>/fee/<int:month>/<int:year>/toggle', methods=['POST'])
 @login_required
 def toggle_fee_status(student_id, month, year):
-    """Toggle fee payment status"""
     try:
         conn = get_db()
-        cursor = conn.cursor()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         
         cursor.execute('''
-            SELECT id, is_paid FROM fees WHERE student_id = ? AND month = ? AND year = ?
+            SELECT id, is_paid FROM fees WHERE student_id = %s AND month = %s AND year = %s
         ''', (student_id, month, year))
         
         fee_record = cursor.fetchone()
@@ -880,8 +829,8 @@ def toggle_fee_status(student_id, month, year):
             payment_date = datetime.now().strftime('%Y-%m-%d') if new_status else None
             
             cursor.execute('''
-                UPDATE fees SET is_paid = ?, payment_date = ?, payment_mode = ?
-                WHERE id = ?
+                UPDATE fees SET is_paid = %s, payment_date = %s, payment_mode = %s
+                WHERE id = %s
             ''', (new_status, payment_date, 'Cash' if new_status else None, fee_record['id']))
             
             conn.commit()
@@ -896,11 +845,10 @@ def toggle_fee_status(student_id, month, year):
 @app.route('/students/grid')
 @login_required
 def students_grid():
-    """Display students in month-wise grid view"""
     year = request.args.get('year', datetime.now().year, type=int)
     
     conn = get_db()
-    cursor = conn.cursor()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
     cursor.execute('SELECT * FROM students ORDER BY admission_number')
     students = cursor.fetchall()
@@ -909,7 +857,7 @@ def students_grid():
     for student in students:
         cursor.execute('''
             SELECT month, is_paid FROM fees 
-            WHERE student_id = ? AND year = ?
+            WHERE student_id = %s AND year = %s
         ''', (student['id'], year))
         
         fees = {row['month']: row['is_paid'] for row in cursor.fetchall()}
@@ -938,14 +886,13 @@ def students_grid():
 @app.route('/student/<int:student_id>/receipt/<int:fee_id>')
 @login_required
 def generate_receipt(student_id, fee_id):
-    """Generate PDF receipt for a payment"""
     conn = get_db()
-    cursor = conn.cursor()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
-    cursor.execute('SELECT * FROM students WHERE id = ?', (student_id,))
+    cursor.execute('SELECT * FROM students WHERE id = %s', (student_id,))
     student = cursor.fetchone()
     
-    cursor.execute('SELECT * FROM fees WHERE id = ?', (fee_id,))
+    cursor.execute('SELECT * FROM fees WHERE id = %s', (fee_id,))
     fee = cursor.fetchone()
     
     cursor.execute('SELECT * FROM institute_info WHERE id = 1')
@@ -957,14 +904,12 @@ def generate_receipt(student_id, fee_id):
         flash('Student or fee record not found', 'error')
         return redirect(url_for('fee_management'))
     
-    # Generate PDF
     filename = f"receipt_{student['admission_number']}_{fee['month']}_{fee['year']}.pdf"
     filepath = os.path.join(PDF_FOLDER, filename)
     
     c = canvas.Canvas(filepath, pagesize=A4)
     width, height = A4
     
-    # Add Logo
     logo_path = 'static/logo/logo.png'
     if os.path.exists(logo_path):
         try:
@@ -975,7 +920,6 @@ def generate_receipt(student_id, fee_id):
         except:
             pass
     
-    # Header
     c.setFont("Helvetica-Bold", 20)
     c.drawCentredString(width/2, height - 110, "SANSA LEARN")
     
@@ -983,11 +927,9 @@ def generate_receipt(student_id, fee_id):
     c.drawCentredString(width/2, height - 130, institute['address'])
     c.drawCentredString(width/2, height - 145, f"Contact: {institute['contact']}")
     
-    # Title
     c.setFont("Helvetica-Bold", 16)
     c.drawCentredString(width/2, height - 175, "FEE RECEIPT")
     
-    # Receipt details
     y = height - 215
     c.setFont("Helvetica", 11)
     
@@ -1002,7 +944,6 @@ def generate_receipt(student_id, fee_id):
     c.line(50, y, width - 50, y)
     y -= 25
     
-    # Student details
     c.setFont("Helvetica-Bold", 11)
     c.drawString(50, y, "Student Details:")
     y -= 20
@@ -1020,7 +961,6 @@ def generate_receipt(student_id, fee_id):
     c.line(50, y, width - 50, y)
     y -= 25
     
-    # Payment details
     c.setFont("Helvetica-Bold", 11)
     c.drawString(50, y, "Payment Details:")
     y -= 20
@@ -1038,12 +978,10 @@ def generate_receipt(student_id, fee_id):
     y -= 30
     c.line(50, y, width - 50, y)
     
-    # Footer
     y = 150
     c.setFont("Helvetica", 10)
     c.drawString(50, y, "For Sansa Learn")
     
-    # Add Signature Image
     signature_path = 'static/logo/signature.jpg'
     if os.path.exists(signature_path):
         try:
@@ -1063,15 +1001,14 @@ def generate_receipt(student_id, fee_id):
 @app.route('/student/<int:student_id>/demand')
 @login_required
 def generate_demand_bill(student_id):
-    """Generate PDF demand bill for unpaid fees"""
     conn = get_db()
-    cursor = conn.cursor()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
-    cursor.execute('SELECT * FROM students WHERE id = ?', (student_id,))
+    cursor.execute('SELECT * FROM students WHERE id = %s', (student_id,))
     student = cursor.fetchone()
     
     cursor.execute('''
-        SELECT * FROM fees WHERE student_id = ? AND is_paid = 0 
+        SELECT * FROM fees WHERE student_id = %s AND is_paid = 0 
         ORDER BY year, month
     ''', (student_id,))
     unpaid_fees = cursor.fetchall()
@@ -1085,14 +1022,12 @@ def generate_demand_bill(student_id):
         flash('Student not found', 'error')
         return redirect(url_for('fee_management'))
     
-    # Generate PDF
     filename = f"demand_{student['admission_number']}_{datetime.now().strftime('%Y%m%d')}.pdf"
     filepath = os.path.join(PDF_FOLDER, filename)
     
     c = canvas.Canvas(filepath, pagesize=A4)
     width, height = A4
     
-    # Add Logo
     logo_path = 'static/logo/logo.png'
     if os.path.exists(logo_path):
         try:
@@ -1103,7 +1038,6 @@ def generate_demand_bill(student_id):
         except:
             pass
     
-    # Header
     c.setFont("Helvetica-Bold", 20)
     c.drawCentredString(width/2, height - 110, "SANSA LEARN")
     
@@ -1111,7 +1045,6 @@ def generate_demand_bill(student_id):
     c.drawCentredString(width/2, height - 130, institute['address'])
     c.drawCentredString(width/2, height - 145, f"Contact: {institute['contact']}")
     
-    # Title
     c.setFont("Helvetica-Bold", 16)
     c.drawCentredString(width/2, height - 175, "FEE DEMAND NOTICE")
     
@@ -1123,7 +1056,6 @@ def generate_demand_bill(student_id):
     c.line(50, y, width - 50, y)
     y -= 25
     
-    # Student details
     c.setFont("Helvetica-Bold", 11)
     c.drawString(50, y, "Student Details:")
     y -= 20
@@ -1141,7 +1073,6 @@ def generate_demand_bill(student_id):
     c.line(50, y, width - 50, y)
     y -= 25
     
-    # Unpaid fees details
     c.setFont("Helvetica-Bold", 11)
     c.drawString(50, y, "Pending Fee Details:")
     y -= 25
@@ -1149,7 +1080,6 @@ def generate_demand_bill(student_id):
     months = ['', 'January', 'February', 'March', 'April', 'May', 'June', 
               'July', 'August', 'September', 'October', 'November', 'December']
     
-    # Table header
     c.setFont("Helvetica-Bold", 10)
     c.drawString(70, y, "Month")
     c.drawString(200, y, "Year")
@@ -1158,158 +1088,6 @@ def generate_demand_bill(student_id):
     c.line(70, y, width - 50, y)
     y -= 5
     
-    # Table rows
-    c.setFont("Helvetica", 10)
-    total_pending = 0
-    for fee in unpaid_fees:
-        y -= 15
-        if y < 150:  # Page break if needed
-            c.showPage()
-            y = height - 50
-        
-        c.drawString(70, y, months[fee['month']])
-        c.drawString(200, y, str(fee['year']))
-        c.drawRightString(width - 70, y, f"{fee['fee_amount']:.2f}")
-        total_pending += fee['fee_amount']
-    
-    y -= 20
-    c.line(70, y, width - 50, y)
-    y -= 20
-    
-    # Total
-    c.setFont("Helvetica-Bold", 11)
-    c.drawString(70, y, "Total Pending:")
-    c.drawRightString(width - 70, y, f"Rs. {total_pending:.2f}")
-    
-    y -= 40
-    c.setFont("Helvetica", 10)
-    c.drawString(50, y, "Kindly clear the above pending fees at the earliest.")
-    
-    # Footer
-    y = 150
-    c.setFont("Helvetica", 10)
-    c.drawString(50, y, "For Sansa Learn")
-    
-    # Add Signature Image
-    signature_path = 'static/logo/signature.jpg'
-    if os.path.exists(signature_path):
-        try:
-            sig_width = 150
-            sig_height = 50
-            c.drawImage(signature_path, 50, y - 60, width=sig_width, height=sig_height)
-        except:
-            pass
-    
-    y -= 70
-    c.drawString(50, y, "Management Signature")
-    
-    c.save()
-    
-    return send_file(filepath, as_attachment=True)
-
-# ============ PUBLIC PDF DOWNLOAD ROUTES (No Login Required) ============
-
-@app.route('/public/demand/<admission_number>/<token>')
-def public_demand_bill(admission_number, token):
-    """Public route for parents to download demand bill without login"""
-    if not verify_pdf_token(admission_number, token):
-        return "Invalid or expired link", 403
-    
-    conn = get_db()
-    cursor = conn.cursor()
-    
-    cursor.execute('SELECT * FROM students WHERE admission_number = ?', (admission_number,))
-    student = cursor.fetchone()
-    
-    if not student:
-        conn.close()
-        return "Student not found", 404
-    
-    cursor.execute('''
-        SELECT * FROM fees WHERE student_id = ? AND is_paid = 0 
-        ORDER BY year, month
-    ''', (student['id'],))
-    unpaid_fees = cursor.fetchall()
-    
-    cursor.execute('SELECT * FROM institute_info WHERE id = 1')
-    institute = cursor.fetchone()
-    
-    conn.close()
-    
-    # Generate PDF
-    filename = f"demand_{admission_number}_{datetime.now().strftime('%Y%m%d')}.pdf"
-    filepath = os.path.join(PDF_FOLDER, filename)
-    
-    c = canvas.Canvas(filepath, pagesize=A4)
-    width, height = A4
-    
-    # Add Logo
-    logo_path = 'static/logo/logo.png'
-    if os.path.exists(logo_path):
-        try:
-            logo_width = 80
-            logo_height = 80
-            c.drawImage(logo_path, (width - logo_width) / 2, height - 90, 
-                       width=logo_width, height=logo_height, preserveAspectRatio=True, mask='auto')
-        except:
-            pass
-    
-    # Header
-    c.setFont("Helvetica-Bold", 20)
-    c.drawCentredString(width/2, height - 110, "SANSA LEARN")
-    
-    c.setFont("Helvetica", 10)
-    c.drawCentredString(width/2, height - 130, institute['address'] if institute else '')
-    c.drawCentredString(width/2, height - 145, f"Contact: {institute['contact']}" if institute else '')
-    
-    # Title
-    c.setFont("Helvetica-Bold", 16)
-    c.drawCentredString(width/2, height - 175, "FEE DEMAND NOTICE")
-    
-    y = height - 215
-    c.setFont("Helvetica", 11)
-    c.drawRightString(width - 50, y, f"Date: {datetime.now().strftime('%Y-%m-%d')}")
-    
-    y -= 30
-    c.line(50, y, width - 50, y)
-    y -= 25
-    
-    # Student details
-    c.setFont("Helvetica-Bold", 11)
-    c.drawString(50, y, "Student Details:")
-    y -= 20
-    
-    c.setFont("Helvetica", 10)
-    c.drawString(70, y, f"Admission No: {student['admission_number']}")
-    y -= 18
-    c.drawString(70, y, f"Name: {student['name']}")
-    y -= 18
-    c.drawString(70, y, f"Father's Name: {student['father_name']}")
-    y -= 18
-    c.drawString(70, y, f"Class: {student['class']}")
-    
-    y -= 30
-    c.line(50, y, width - 50, y)
-    y -= 25
-    
-    # Unpaid fees details
-    c.setFont("Helvetica-Bold", 11)
-    c.drawString(50, y, "Pending Fee Details:")
-    y -= 25
-    
-    months = ['', 'January', 'February', 'March', 'April', 'May', 'June', 
-              'July', 'August', 'September', 'October', 'November', 'December']
-    
-    # Table header
-    c.setFont("Helvetica-Bold", 10)
-    c.drawString(70, y, "Month")
-    c.drawString(200, y, "Year")
-    c.drawRightString(width - 70, y, "Amount (Rs.)")
-    y -= 18
-    c.line(70, y, width - 50, y)
-    y -= 5
-    
-    # Table rows
     c.setFont("Helvetica", 10)
     total_pending = 0
     for fee in unpaid_fees:
@@ -1327,7 +1105,6 @@ def public_demand_bill(admission_number, token):
     c.line(70, y, width - 50, y)
     y -= 20
     
-    # Total
     c.setFont("Helvetica-Bold", 11)
     c.drawString(70, y, "Total Pending:")
     c.drawRightString(width - 70, y, f"Rs. {total_pending:.2f}")
@@ -1336,12 +1113,147 @@ def public_demand_bill(admission_number, token):
     c.setFont("Helvetica", 10)
     c.drawString(50, y, "Kindly clear the above pending fees at the earliest.")
     
-    # Footer
     y = 150
     c.setFont("Helvetica", 10)
     c.drawString(50, y, "For Sansa Learn")
     
-    # Add Signature Image
+    signature_path = 'static/logo/signature.jpg'
+    if os.path.exists(signature_path):
+        try:
+            sig_width = 150
+            sig_height = 50
+            c.drawImage(signature_path, 50, y - 60, width=sig_width, height=sig_height)
+        except:
+            pass
+    
+    y -= 70
+    c.drawString(50, y, "Management Signature")
+    
+    c.save()
+    
+    return send_file(filepath, as_attachment=True)
+
+@app.route('/public/demand/<admission_number>/<token>')
+def public_demand_bill(admission_number, token):
+    if not verify_pdf_token(admission_number, token):
+        return "Invalid or expired link", 403
+    
+    conn = get_db()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    
+    cursor.execute('SELECT * FROM students WHERE admission_number = %s', (admission_number,))
+    student = cursor.fetchone()
+    
+    if not student:
+        conn.close()
+        return "Student not found", 404
+    
+    cursor.execute('''
+        SELECT * FROM fees WHERE student_id = %s AND is_paid = 0 
+        ORDER BY year, month
+    ''', (student['id'],))
+    unpaid_fees = cursor.fetchall()
+    
+    cursor.execute('SELECT * FROM institute_info WHERE id = 1')
+    institute = cursor.fetchone()
+    
+    conn.close()
+    
+    filename = f"demand_{admission_number}_{datetime.now().strftime('%Y%m%d')}.pdf"
+    filepath = os.path.join(PDF_FOLDER, filename)
+    
+    c = canvas.Canvas(filepath, pagesize=A4)
+    width, height = A4
+    
+    logo_path = 'static/logo/logo.png'
+    if os.path.exists(logo_path):
+        try:
+            logo_width = 80
+            logo_height = 80
+            c.drawImage(logo_path, (width - logo_width) / 2, height - 90, 
+                       width=logo_width, height=logo_height, preserveAspectRatio=True, mask='auto')
+        except:
+            pass
+    
+    c.setFont("Helvetica-Bold", 20)
+    c.drawCentredString(width/2, height - 110, "SANSA LEARN")
+    
+    c.setFont("Helvetica", 10)
+    c.drawCentredString(width/2, height - 130, institute['address'] if institute else '')
+    c.drawCentredString(width/2, height - 145, f"Contact: {institute['contact']}" if institute else '')
+    
+    c.setFont("Helvetica-Bold", 16)
+    c.drawCentredString(width/2, height - 175, "FEE DEMAND NOTICE")
+    
+    y = height - 215
+    c.setFont("Helvetica", 11)
+    c.drawRightString(width - 50, y, f"Date: {datetime.now().strftime('%Y-%m-%d')}")
+    
+    y -= 30
+    c.line(50, y, width - 50, y)
+    y -= 25
+    
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(50, y, "Student Details:")
+    y -= 20
+    
+    c.setFont("Helvetica", 10)
+    c.drawString(70, y, f"Admission No: {student['admission_number']}")
+    y -= 18
+    c.drawString(70, y, f"Name: {student['name']}")
+    y -= 18
+    c.drawString(70, y, f"Father's Name: {student['father_name']}")
+    y -= 18
+    c.drawString(70, y, f"Class: {student['class']}")
+    
+    y -= 30
+    c.line(50, y, width - 50, y)
+    y -= 25
+    
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(50, y, "Pending Fee Details:")
+    y -= 25
+    
+    months = ['', 'January', 'February', 'March', 'April', 'May', 'June', 
+              'July', 'August', 'September', 'October', 'November', 'December']
+    
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(70, y, "Month")
+    c.drawString(200, y, "Year")
+    c.drawRightString(width - 70, y, "Amount (Rs.)")
+    y -= 18
+    c.line(70, y, width - 50, y)
+    y -= 5
+    
+    c.setFont("Helvetica", 10)
+    total_pending = 0
+    for fee in unpaid_fees:
+        y -= 15
+        if y < 150:
+            c.showPage()
+            y = height - 50
+        
+        c.drawString(70, y, months[fee['month']])
+        c.drawString(200, y, str(fee['year']))
+        c.drawRightString(width - 70, y, f"{fee['fee_amount']:.2f}")
+        total_pending += fee['fee_amount']
+    
+    y -= 20
+    c.line(70, y, width - 50, y)
+    y -= 20
+    
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(70, y, "Total Pending:")
+    c.drawRightString(width - 70, y, f"Rs. {total_pending:.2f}")
+    
+    y -= 40
+    c.setFont("Helvetica", 10)
+    c.drawString(50, y, "Kindly clear the above pending fees at the earliest.")
+    
+    y = 150
+    c.setFont("Helvetica", 10)
+    c.drawString(50, y, "For Sansa Learn")
+    
     signature_path = 'static/logo/signature.jpg'
     if os.path.exists(signature_path):
         try:
@@ -1360,21 +1272,20 @@ def public_demand_bill(admission_number, token):
 
 @app.route('/public/receipt/<admission_number>/<int:fee_id>/<token>')
 def public_receipt(admission_number, fee_id, token):
-    """Public route for parents to download receipt without login"""
     if not verify_pdf_token(admission_number, token):
         return "Invalid or expired link", 403
     
     conn = get_db()
-    cursor = conn.cursor()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
-    cursor.execute('SELECT * FROM students WHERE admission_number = ?', (admission_number,))
+    cursor.execute('SELECT * FROM students WHERE admission_number = %s', (admission_number,))
     student = cursor.fetchone()
     
     if not student:
         conn.close()
         return "Student not found", 404
     
-    cursor.execute('SELECT * FROM fees WHERE id = ? AND student_id = ?', (fee_id, student['id']))
+    cursor.execute('SELECT * FROM fees WHERE id = %s AND student_id = %s', (fee_id, student['id']))
     fee = cursor.fetchone()
     
     if not fee:
@@ -1386,14 +1297,12 @@ def public_receipt(admission_number, fee_id, token):
     
     conn.close()
     
-    # Generate PDF
     filename = f"receipt_{admission_number}_{fee['month']}_{fee['year']}.pdf"
     filepath = os.path.join(PDF_FOLDER, filename)
     
     c = canvas.Canvas(filepath, pagesize=A4)
     width, height = A4
     
-    # Add Logo
     logo_path = 'static/logo/logo.png'
     if os.path.exists(logo_path):
         try:
@@ -1404,7 +1313,6 @@ def public_receipt(admission_number, fee_id, token):
         except:
             pass
     
-    # Header
     c.setFont("Helvetica-Bold", 20)
     c.drawCentredString(width/2, height - 110, "SANSA LEARN")
     
@@ -1412,11 +1320,9 @@ def public_receipt(admission_number, fee_id, token):
     c.drawCentredString(width/2, height - 130, institute['address'] if institute else '')
     c.drawCentredString(width/2, height - 145, f"Contact: {institute['contact']}" if institute else '')
     
-    # Title
     c.setFont("Helvetica-Bold", 16)
     c.drawCentredString(width/2, height - 175, "FEE RECEIPT")
     
-    # Receipt details
     y = height - 215
     c.setFont("Helvetica", 11)
     
@@ -1431,7 +1337,6 @@ def public_receipt(admission_number, fee_id, token):
     c.line(50, y, width - 50, y)
     y -= 25
     
-    # Student details
     c.setFont("Helvetica-Bold", 11)
     c.drawString(50, y, "Student Details:")
     y -= 20
@@ -1449,7 +1354,6 @@ def public_receipt(admission_number, fee_id, token):
     c.line(50, y, width - 50, y)
     y -= 25
     
-    # Payment details
     c.setFont("Helvetica-Bold", 11)
     c.drawString(50, y, "Payment Details:")
     y -= 20
@@ -1467,12 +1371,10 @@ def public_receipt(admission_number, fee_id, token):
     y -= 30
     c.line(50, y, width - 50, y)
     
-    # Footer
     y = 150
     c.setFont("Helvetica", 10)
     c.drawString(50, y, "For Sansa Learn")
     
-    # Add Signature Image
     signature_path = 'static/logo/signature.jpg'
     if os.path.exists(signature_path):
         try:
@@ -1491,14 +1393,13 @@ def public_receipt(admission_number, fee_id, token):
 
 @app.route('/public/profile/<admission_number>/<token>')
 def public_student_profile(admission_number, token):
-    """Public route for parents to download student profile PDF without login"""
     if not verify_pdf_token(admission_number, token):
         return "Invalid or expired link", 403
     
     conn = get_db()
-    cursor = conn.cursor()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
-    cursor.execute('SELECT * FROM students WHERE admission_number = ?', (admission_number,))
+    cursor.execute('SELECT * FROM students WHERE admission_number = %s', (admission_number,))
     student = cursor.fetchone()
     
     if not student:
@@ -1510,14 +1411,12 @@ def public_student_profile(admission_number, token):
     
     conn.close()
     
-    # Generate PDF
     filename = f"profile_{admission_number}.pdf"
     filepath = os.path.join(PDF_FOLDER, filename)
     
     c = canvas.Canvas(filepath, pagesize=A4)
     width, height = A4
     
-    # Add Logo
     logo_path = 'static/logo/logo.png'
     if os.path.exists(logo_path):
         try:
@@ -1528,7 +1427,6 @@ def public_student_profile(admission_number, token):
         except:
             pass
     
-    # Header
     c.setFont("Helvetica-Bold", 22)
     c.drawCentredString(width/2, height - 50, "SANSA LEARN")
     
@@ -1537,7 +1435,6 @@ def public_student_profile(admission_number, token):
         c.drawCentredString(width/2, height - 68, institute['address'] or '')
         c.drawCentredString(width/2, height - 82, f"Contact: {institute['contact']}" if institute['contact'] else '')
     
-    # Title with decorative line
     y = height - 110
     c.setStrokeColorRGB(0.2, 0.4, 0.6)
     c.setLineWidth(2)
@@ -1552,7 +1449,6 @@ def public_student_profile(admission_number, token):
     c.setLineWidth(1)
     c.line(50, y, width - 50, y)
     
-    # Student Photo on right side
     photo_x = width - 150
     photo_y = y - 130
     photo_width = 100
@@ -1562,7 +1458,6 @@ def public_student_profile(admission_number, token):
         try:
             c.drawImage(student['photo_path'], photo_x, photo_y, 
                        width=photo_width, height=photo_height, preserveAspectRatio=True)
-            # Border around photo
             c.rect(photo_x, photo_y, photo_width, photo_height)
         except:
             c.rect(photo_x, photo_y, photo_width, photo_height)
@@ -1573,7 +1468,6 @@ def public_student_profile(admission_number, token):
         c.setFont("Helvetica", 9)
         c.drawCentredString(photo_x + photo_width/2, photo_y + photo_height/2, "No Photo")
     
-    # Student Details - Left side
     y -= 30
     left_margin = 60
     label_x = left_margin
@@ -1621,7 +1515,6 @@ def public_student_profile(admission_number, token):
         c.setFont("Helvetica-Bold", 10)
         c.drawString(label_x, y, label)
         c.setFont("Helvetica", 10)
-        # Truncate long values
         display_value = str(value)[:40] + "..." if len(str(value)) > 40 else str(value)
         c.drawString(value_x, y, display_value)
         y -= 18
@@ -1643,7 +1536,6 @@ def public_student_profile(admission_number, token):
         c.setFont("Helvetica-Bold", 10)
         c.drawString(label_x, y, label)
         c.setFont("Helvetica", 10)
-        # Handle multi-line address
         if label == "Address:" and value and len(value) > 50:
             lines = [value[i:i+50] for i in range(0, len(value), 50)]
             c.drawString(value_x, y, lines[0])
@@ -1687,7 +1579,6 @@ def public_student_profile(admission_number, token):
         other_text = student['other_details'][:200]
         c.drawString(label_x + 10, y, other_text)
     
-    # Footer
     y = 100
     c.setStrokeColorRGB(0.2, 0.4, 0.6)
     c.setLineWidth(1)
@@ -1698,7 +1589,6 @@ def public_student_profile(admission_number, token):
     c.drawString(50, y, f"Generated on: {datetime.now().strftime('%d-%m-%Y %H:%M')}")
     c.drawString(50, y - 15, "For Sansa Learn")
     
-    # Add Signature Image
     signature_path = 'static/logo/signature.jpg'
     if os.path.exists(signature_path):
         try:
@@ -1710,7 +1600,6 @@ def public_student_profile(admission_number, token):
     
     c.drawRightString(width - 50, y - 55, "Authorized Signature")
     
-    # Welcome message at bottom
     y -= 75
     c.setFont("Helvetica-Oblique", 10)
     c.setFillColorRGB(0.3, 0.3, 0.3)
@@ -1720,32 +1609,26 @@ def public_student_profile(admission_number, token):
     
     return send_file(filepath, as_attachment=True)
 
-# ============ END PUBLIC PDF ROUTES ============
-
 @app.route('/export/students')
 @login_required
 def export_students():
-    """Export all students to CSV"""
     conn = get_db()
-    cursor = conn.cursor()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     cursor.execute('SELECT * FROM students')
     students = cursor.fetchall()
     conn.close()
     
-    # Create CSV
     filename = f"students_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
     filepath = os.path.join(PDF_FOLDER, filename)
     
     with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
         writer = csv.writer(csvfile)
-        # Header
         writer.writerow([
             'ID', 'Admission Number', 'Name', 'Father Name', 'Mother Name',
             'DOB', 'Gender', 'Class', 'Board', 'Medium', 'School Name',
             'Address', 'Mobile 1', 'Mobile 2', 'Fee Per Month', 'Discount',
             'Admission Date', 'Other Details'
         ])
-        # Data
         for student in students:
             writer.writerow([
                 student['id'], student['admission_number'], student['name'],
@@ -1761,9 +1644,8 @@ def export_students():
 @app.route('/export/fees')
 @login_required
 def export_fees():
-    """Export all fees to CSV"""
     conn = get_db()
-    cursor = conn.cursor()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     cursor.execute('''
         SELECT f.*, s.admission_number, s.name 
         FROM fees f 
@@ -1773,7 +1655,6 @@ def export_fees():
     fees = cursor.fetchall()
     conn.close()
     
-    # Create CSV
     filename = f"fees_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
     filepath = os.path.join(PDF_FOLDER, filename)
     
@@ -1782,12 +1663,10 @@ def export_fees():
     
     with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
         writer = csv.writer(csvfile)
-        # Header
         writer.writerow([
             'Fee ID', 'Student Admission No', 'Student Name', 'Month', 'Year',
             'Fee Amount', 'Is Paid', 'Payment Date', 'Payment Mode', 'Remarks'
         ])
-        # Data
         for fee in fees:
             writer.writerow([
                 fee['id'], fee['admission_number'], fee['name'],
@@ -1798,14 +1677,11 @@ def export_fees():
     
     return send_file(filepath, as_attachment=True)
 
-# ============ SESSION MANAGEMENT ROUTES ============
-
 @app.route('/sessions')
 @login_required
 def manage_sessions():
-    """View all active sessions"""
     conn = get_db()
-    cursor = conn.cursor()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
     cursor.execute('''
         SELECT * FROM manager_sessions 
@@ -1834,11 +1710,10 @@ def manage_sessions():
 @app.route('/sessions/revoke/<int:session_id>', methods=['POST'])
 @login_required
 def revoke_session(session_id):
-    """Revoke a specific session"""
     conn = get_db()
-    cursor = conn.cursor()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     
-    cursor.execute('SELECT session_id, is_active FROM manager_sessions WHERE id = ?', (session_id,))
+    cursor.execute('SELECT session_id, is_active FROM manager_sessions WHERE id = %s', (session_id,))
     result = cursor.fetchone()
     
     if result:
@@ -1851,7 +1726,7 @@ def revoke_session(session_id):
             flash('You cannot revoke your own current session.', 'warning')
         else:
             cursor.execute('''
-                UPDATE manager_sessions SET is_active = 0 WHERE id = ? AND is_active = 1
+                UPDATE manager_sessions SET is_active = 0 WHERE id = %s AND is_active = 1
             ''', (session_id,))
             if cursor.rowcount > 0:
                 conn.commit()
@@ -1867,14 +1742,13 @@ def revoke_session(session_id):
 @app.route('/sessions/revoke-all', methods=['POST'])
 @login_required
 def revoke_all_sessions():
-    """Revoke all sessions except current one"""
     current_session_id = session.get('session_record_id')
     
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute('''
         UPDATE manager_sessions SET is_active = 0 
-        WHERE session_id != ? AND is_active = 1
+        WHERE session_id != %s AND is_active = 1
     ''', (current_session_id,))
     revoked_count = cursor.rowcount
     conn.commit()
@@ -1886,12 +1760,11 @@ def revoke_all_sessions():
 @app.route('/sessions/cleanup', methods=['POST'])
 @login_required
 def cleanup_sessions():
-    """Delete old inactive sessions"""
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute('''
         DELETE FROM manager_sessions 
-        WHERE is_active = 0 AND datetime(last_seen_at) < datetime('now', '-30 days')
+        WHERE is_active = 0 AND last_seen_at < NOW() - INTERVAL '30 days'
     ''')
     deleted_count = cursor.rowcount
     conn.commit()
@@ -1900,14 +1773,9 @@ def cleanup_sessions():
     flash(f'{deleted_count} old session(s) have been cleaned up.', 'success')
     return redirect(url_for('manage_sessions'))
 
-# ============ END SESSION MANAGEMENT ROUTES ============
-
-# ============ BACKUP & RESTORE ROUTES ============
-
 @app.route('/backup')
 @login_required
 def backup_page():
-    """Backup management page"""
     backup_files = []
     if os.path.exists(BACKUP_FOLDER):
         for f in os.listdir(BACKUP_FOLDER):
@@ -1938,7 +1806,6 @@ def backup_page():
 @app.route('/backup/create', methods=['POST'])
 @login_required
 def create_backup():
-    """Create a full backup of database and uploaded files"""
     try:
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         backup_name = f"sansa_learn_backup_{timestamp}"
@@ -1946,7 +1813,7 @@ def create_backup():
         os.makedirs(backup_dir, exist_ok=True)
         
         conn = get_db()
-        cursor = conn.cursor()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         
         cursor.execute('SELECT * FROM students')
         students = [dict(row) for row in cursor.fetchall()]
@@ -1958,7 +1825,7 @@ def create_backup():
         institute_info = [dict(row) for row in cursor.fetchall()]
         
         cursor.execute('SELECT * FROM manager_sessions')
-        sessions = [dict(row) for row in cursor.fetchall()]
+        sessions_data = [dict(row) for row in cursor.fetchall()]
         
         conn.close()
         
@@ -1968,7 +1835,7 @@ def create_backup():
             'students': students,
             'fees': fees,
             'institute_info': institute_info,
-            'manager_sessions': sessions,
+            'manager_sessions': sessions_data,
             'statistics': {
                 'total_students': len(students),
                 'total_fees': len(fees)
@@ -2004,7 +1871,6 @@ def create_backup():
 @app.route('/backup/download/<filename>')
 @login_required
 def download_backup(filename):
-    """Download a backup file"""
     if not filename.endswith('.zip'):
         flash('Invalid backup file.', 'error')
         return redirect(url_for('backup_page'))
@@ -2019,7 +1885,6 @@ def download_backup(filename):
 @app.route('/backup/delete/<filename>', methods=['POST'])
 @login_required
 def delete_backup(filename):
-    """Delete a backup file"""
     if not filename.endswith('.zip'):
         flash('Invalid backup file.', 'error')
         return redirect(url_for('backup_page'))
@@ -2036,7 +1901,6 @@ def delete_backup(filename):
 @app.route('/backup/restore', methods=['POST'])
 @login_required
 def restore_backup():
-    """Restore from an uploaded backup file"""
     if 'backup_file' not in request.files:
         flash('No backup file uploaded.', 'error')
         return redirect(url_for('backup_page'))
@@ -2087,7 +1951,7 @@ def restore_backup():
                 INSERT INTO students (id, admission_number, photo_path, name, father_name, mother_name,
                     dob, gender, class, board, medium, school_name, address, mobile1, mobile2,
                     fee_per_month, discount, admission_date, other_details, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ''', (
                 student.get('id'), student.get('admission_number'), student.get('photo_path'),
                 student.get('name'), student.get('father_name'), student.get('mother_name'),
@@ -2102,7 +1966,7 @@ def restore_backup():
             cursor.execute('''
                 INSERT INTO fees (id, student_id, month, year, fee_amount, is_paid,
                     payment_date, payment_mode, remarks, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ''', (
                 fee.get('id'), fee.get('student_id'), fee.get('month'), fee.get('year'),
                 fee.get('fee_amount'), fee.get('is_paid'), fee.get('payment_date'),
@@ -2113,7 +1977,7 @@ def restore_backup():
             cursor.execute('''
                 INSERT INTO manager_sessions (id, session_id, ip_address, user_agent,
                     device_name, os, browser, is_active, created_at, last_seen_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ''', (
                 sess.get('id'), sess.get('session_id'), sess.get('ip_address'),
                 sess.get('user_agent'), sess.get('device_name'), sess.get('os'),
@@ -2121,31 +1985,31 @@ def restore_backup():
                 sess.get('last_seen_at')
             ))
         
+        cursor.execute("SELECT setval('students_id_seq', COALESCE((SELECT MAX(id) FROM students), 1))")
+        cursor.execute("SELECT setval('fees_id_seq', COALESCE((SELECT MAX(id) FROM fees), 1))")
+        cursor.execute("SELECT setval('manager_sessions_id_seq', COALESCE((SELECT MAX(id) FROM manager_sessions), 1))")
+        
         conn.commit()
         conn.close()
         
-        uploads_restore = os.path.join(restore_root, 'uploads')
-        if os.path.exists(uploads_restore):
-            for item in os.listdir(uploads_restore):
-                src = os.path.join(uploads_restore, item)
-                dst = os.path.join(UPLOAD_FOLDER, item)
-                if os.path.isfile(src):
-                    shutil.copy2(src, dst)
+        uploads_backup = os.path.join(restore_root, 'uploads')
+        if os.path.exists(uploads_backup):
+            if os.path.exists(UPLOAD_FOLDER):
+                shutil.rmtree(UPLOAD_FOLDER)
+            shutil.copytree(uploads_backup, UPLOAD_FOLDER)
+        
+        logo_backup = os.path.join(restore_root, 'logo')
+        if os.path.exists(logo_backup):
+            if os.path.exists('static/logo'):
+                shutil.rmtree('static/logo')
+            shutil.copytree(logo_backup, 'static/logo')
         
         shutil.rmtree(temp_dir)
         
         stats = backup_data.get('statistics', {})
-        flash(f"Backup restored successfully! {stats.get('total_students', 0)} students and {stats.get('total_fees', 0)} fee records restored.", 'success')
+        flash(f'Backup restored successfully! Restored {stats.get("total_students", 0)} students and {stats.get("total_fees", 0)} fee records.', 'success')
         
     except Exception as e:
-        if os.path.exists(temp_dir):
-            shutil.rmtree(temp_dir)
         flash(f'Error restoring backup: {str(e)}', 'error')
     
     return redirect(url_for('backup_page'))
-
-# ============ END BACKUP & RESTORE ROUTES ============
-
-if __name__ == '__main__':
-    init_db()
-    app.run(host='0.0.0.0', port=5000, debug=True)
