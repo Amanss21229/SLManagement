@@ -268,7 +268,7 @@ def build_registration_whatsapp_url(mobile, student_name, admission_no, father_n
     _Where Learning Shines_
 ━━━━━━━━━━━━━━━━━━━━━
 
-Dear *{father_name}*,
+Dear Parents,
 
 We are delighted to welcome *{student_name}* to the SANSA LEARN family! 🌟
 
