@@ -54,3 +54,12 @@ psycopg2-binary
 python-dateutil
 reportlab
 werkzeug
+email-validator
+flask
+flask-sqlalchemy
+gunicorn
+pillow
+psycopg2-binary
+python-dateutil
+reportlab
+werkzeug
