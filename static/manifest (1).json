@@ -1,0 +1,18 @@
+{
+  "background_color": "#090909",
+  "dir": "ltr",
+  "display": "standalone",
+  "name": "Sansa Learn",
+  "orientation": "any",
+  "scope": "/",
+  "short_name": "SansaLearn",
+  "start_url": "/",
+  "theme_color": "#ffffff",
+  "categories": [
+    "business",
+    "education",
+    "personalization"
+  ],
+  "lang": "en",
+  "description": "Sansa Learn— Management App For Team Managers Only"
+}
