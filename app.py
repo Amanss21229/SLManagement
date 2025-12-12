@@ -197,7 +197,7 @@ def get_unpaid_months_details(student_id):
     
     cursor.execute('''
         SELECT month, year, fee_amount FROM fees 
-        WHERE student_id = %s AND is_paid = FALSE
+        WHERE student_id = %s AND is_paid = 0
         ORDER BY year, month
     ''', (student_id,))
     
@@ -379,7 +379,7 @@ def logout():
         conn = get_db()
         cursor = conn.cursor()
         cursor.execute('''
-            UPDATE manager_sessions SET is_active = FALSE WHERE session_id = %s
+            UPDATE manager_sessions SET is_active = 0 WHERE session_id = %s
         ''', (session.get('session_record_id'),))
         conn.commit()
         conn.close()
@@ -401,14 +401,14 @@ def dashboard():
     
     cursor.execute('''
         SELECT COALESCE(SUM(fee_amount), 0) FROM fees 
-        WHERE month = %s AND year = %s AND is_paid = TRUE
+        WHERE month = %s AND year = %s AND is_paid = 1
     ''', (current_month, current_year))
     total_paid_this_month = cursor.fetchone()[0]
     
     cursor.execute('''
         SELECT COALESCE(SUM(f.fee_amount), 0) FROM fees f
         JOIN students s ON f.student_id = s.id
-        WHERE f.month = %s AND f.year = %s AND f.is_paid = FALSE
+        WHERE f.month = %s AND f.year = %s AND f.is_paid = 0
     ''', (current_month, current_year))
     total_pending_this_month = cursor.fetchone()[0]
     
@@ -728,13 +728,13 @@ def student_fees(student_id):
     
     cursor.execute('''
         SELECT COALESCE(SUM(fee_amount), 0) FROM fees 
-        WHERE student_id = %s AND is_paid = TRUE
+        WHERE student_id = %s AND is_paid = 1
     ''', (student_id,))
     total_paid = cursor.fetchone()[0]
     
     cursor.execute('''
         SELECT COALESCE(SUM(fee_amount), 0) FROM fees 
-        WHERE student_id = %s AND is_paid = FALSE
+        WHERE student_id = %s AND is_paid = 0
     ''', (student_id,))
     total_pending = cursor.fetchone()[0]
     
@@ -754,7 +754,7 @@ def add_fee_record(student_id):
         month = int(request.form['month'])
         year = int(request.form['year'])
         fee_amount = float(request.form['fee_amount'])
-        is_paid = True if request.form.get('is_paid') == 'on' else False
+        is_paid = 1 if request.form.get('is_paid') == 'on' else 0
         payment_date = request.form.get('payment_date', '')
         payment_mode = request.form.get('payment_mode', '')
         remarks = request.form.get('remarks', '')
@@ -1010,7 +1010,7 @@ def generate_demand_bill(student_id):
     student = cursor.fetchone()
     
     cursor.execute('''
-        SELECT * FROM fees WHERE student_id = %s AND is_paid = FALSE 
+        SELECT * FROM fees WHERE student_id = %s AND is_paid = 0 
         ORDER BY year, month
     ''', (student_id,))
     unpaid_fees = cursor.fetchall()
@@ -1151,7 +1151,7 @@ def public_demand_bill(admission_number, token):
         return "Student not found", 404
     
     cursor.execute('''
-        SELECT * FROM fees WHERE student_id = %s AND is_paid = FALSE 
+        SELECT * FROM fees WHERE student_id = %s AND is_paid = 0 
         ORDER BY year, month
     ''', (student['id'],))
     unpaid_fees = cursor.fetchall()
@@ -1687,14 +1687,14 @@ def manage_sessions():
     
     cursor.execute('''
         SELECT * FROM manager_sessions 
-        WHERE is_active = TRUE
+        WHERE is_active = 1
         ORDER BY last_seen_at DESC
     ''')
     active_sessions = cursor.fetchall()
     
     cursor.execute('''
         SELECT * FROM manager_sessions 
-        WHERE is_active = FALSE
+        WHERE is_active = 0
         ORDER BY last_seen_at DESC
         LIMIT 10
     ''')
@@ -1728,7 +1728,7 @@ def revoke_session(session_id):
             flash('You cannot revoke your own current session.', 'warning')
         else:
             cursor.execute('''
-                UPDATE manager_sessions SET is_active = FALSE WHERE id = %s AND is_active = TRUE
+                UPDATE manager_sessions SET is_active = 0 WHERE id = %s AND is_active = 1
             ''', (session_id,))
             if cursor.rowcount > 0:
                 conn.commit()
@@ -1749,8 +1749,8 @@ def revoke_all_sessions():
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute('''
-        UPDATE manager_sessions SET is_active = FALSE 
-        WHERE session_id != %s AND is_active = TRUE
+        UPDATE manager_sessions SET is_active = 0 
+        WHERE session_id != %s AND is_active = 1
     ''', (current_session_id,))
     revoked_count = cursor.rowcount
     conn.commit()
@@ -1766,7 +1766,7 @@ def cleanup_sessions():
     cursor = conn.cursor()
     cursor.execute('''
         DELETE FROM manager_sessions 
-        WHERE is_active = FALSE AND last_seen_at < NOW() - INTERVAL '30 days'
+        WHERE is_active = 0 AND last_seen_at < NOW() - INTERVAL '30 days'
     ''')
     deleted_count = cursor.rowcount
     conn.commit()
