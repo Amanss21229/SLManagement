@@ -66,6 +66,8 @@
                                 <option value="">Select...</option>
                                 <option value="CBSE" {% if student.board == 'CBSE' %}selected{% endif %}>CBSE</option>
                                 <option value="BSEB" {% if student.board == 'BSEB' %}selected{% endif %}>BSEB</option>
+                                <option value="ICSE" {% if student.board == 'ICSE' %}selected{% endif %}>ICSE</option>
+                                <option value="OTHERS" {% if student.board == 'OTHERS' %}selected{% endif %}>OTHERS</option>
                             </select>
                         </div>
                     </div>
