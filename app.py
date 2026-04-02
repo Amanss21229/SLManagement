@@ -1,4 +1,5 @@
 import os
+import calendar
 import psycopg2
 import psycopg2.extras
 import csv
@@ -171,7 +172,8 @@ def ensure_fee_records(student_id, admission_date, fee_per_month, discount=0.0):
     current_dt = datetime.now()
     net_fee = fee_per_month - discount
     
-    temp_dt = admission_dt
+    # First due date is one full month after admission
+    temp_dt = admission_dt + relativedelta(months=1)
     while temp_dt <= current_dt:
         month = temp_dt.month
         year = temp_dt.year
@@ -218,6 +220,23 @@ def get_unpaid_months_details(student_id):
         total_due += amount
     
     return unpaid_list, total_due
+
+
+def fee_date_range(fee_month, fee_year, admission_date_str):
+    """Return a readable period string for a fee record, e.g. '26 Feb 2026 - 26 Mar 2026'."""
+    if not admission_date_str:
+        return ''
+    try:
+        admission_dt = datetime.strptime(admission_date_str, '%Y-%m-%d')
+        day = admission_dt.day
+        last_day_due = calendar.monthrange(fee_year, fee_month)[1]
+        due_day = min(day, last_day_due)
+        due_date = datetime(fee_year, fee_month, due_day)
+        period_start = due_date - relativedelta(months=1)
+        return f"{period_start.strftime('%d %b %Y')} - {due_date.strftime('%d %b %Y')}"
+    except Exception:
+        return ''
+
 
 def build_whatsapp_url(mobile, student_name, admission_no, unpaid_list, total_due, demand_bill_url=''):
     if not mobile:
@@ -590,6 +609,12 @@ def view_student(student_id):
         demand_bill_url
     )
     
+    admission_date_str = student['admission_date'] or ''
+    fee_periods = {
+        fee['id']: fee_date_range(fee['month'], fee['year'], admission_date_str)
+        for fee in all_fee_records
+    }
+
     conn.close()
     
     return render_template('view_student.html', 
@@ -597,7 +622,8 @@ def view_student(student_id):
                          fee_records=all_fee_records,
                          months=months,
                          whatsapp_url=whatsapp_url,
-                         total_due=total_due)
+                         total_due=total_due,
+                         fee_periods=fee_periods)
 
 @app.route('/student/<int:student_id>/edit', methods=['GET', 'POST'])
 @login_required
@@ -742,10 +768,17 @@ def student_fees(student_id):
     
     months = ['January', 'February', 'March', 'April', 'May', 'June', 
               'July', 'August', 'September', 'October', 'November', 'December']
-    
+
+    admission_date_str = student['admission_date'] or ''
+    fee_periods = {
+        fee['id']: fee_date_range(fee['month'], fee['year'], admission_date_str)
+        for fee in fee_records
+    }
+
     return render_template('student_fees.html', student=student, 
                          fee_records=fee_records, months=months,
-                         total_paid=total_paid, total_pending=total_pending)
+                         total_paid=total_paid, total_pending=total_pending,
+                         fee_periods=fee_periods)
 
 @app.route('/student/<int:student_id>/fees/add', methods=['POST'])
 @login_required
@@ -1079,46 +1112,47 @@ def generate_demand_bill(student_id):
     c.drawString(50, y, "Pending Fee Details:")
     y -= 25
     
-    months = ['', 'January', 'February', 'March', 'April', 'May', 'June', 
-              'July', 'August', 'September', 'October', 'November', 'December']
-    
+    months_names = ['', 'January', 'February', 'March', 'April', 'May', 'June',
+                    'July', 'August', 'September', 'October', 'November', 'December']
+
     c.setFont("Helvetica-Bold", 10)
     c.drawString(70, y, "Month")
-    c.drawString(200, y, "Year")
+    c.drawString(170, y, "Period")
     c.drawRightString(width - 70, y, "Amount (Rs.)")
     y -= 18
     c.line(70, y, width - 50, y)
     y -= 5
-    
+
     c.setFont("Helvetica", 10)
     total_pending = 0
+    admission_date_str = student['admission_date'] or ''
     for fee in unpaid_fees:
-        y -= 15
+        y -= 16
         if y < 150:
             c.showPage()
             y = height - 50
-        
-        c.drawString(70, y, months[fee['month']])
-        c.drawString(200, y, str(fee['year']))
+        period = fee_date_range(fee['month'], fee['year'], admission_date_str)
+        c.drawString(70, y, f"{months_names[fee['month']]} {fee['year']}")
+        c.drawString(170, y, period)
         c.drawRightString(width - 70, y, f"{fee['fee_amount']:.2f}")
         total_pending += fee['fee_amount']
-    
+
     y -= 20
     c.line(70, y, width - 50, y)
     y -= 20
-    
+
     c.setFont("Helvetica-Bold", 11)
     c.drawString(70, y, "Total Pending:")
     c.drawRightString(width - 70, y, f"Rs. {total_pending:.2f}")
-    
+
     y -= 40
     c.setFont("Helvetica", 10)
     c.drawString(50, y, "Kindly clear the above pending fees at the earliest.")
-    
+
     y = 150
     c.setFont("Helvetica", 10)
     c.drawString(50, y, "For Sansa Learn")
-    
+
     signature_path = 'static/logo/signature.jpg'
     if os.path.exists(signature_path):
         try:
@@ -1127,12 +1161,12 @@ def generate_demand_bill(student_id):
             c.drawImage(signature_path, 50, y - 60, width=sig_width, height=sig_height)
         except:
             pass
-    
+
     y -= 70
     c.drawString(50, y, "Management Signature")
-    
+
     c.save()
-    
+
     return send_file(filepath, as_attachment=True)
 
 @app.route('/public/demand/<admission_number>/<token>')
@@ -1221,41 +1255,42 @@ def public_demand_bill(admission_number, token):
     
     c.setFont("Helvetica-Bold", 10)
     c.drawString(70, y, "Month")
-    c.drawString(200, y, "Year")
+    c.drawString(170, y, "Period")
     c.drawRightString(width - 70, y, "Amount (Rs.)")
     y -= 18
     c.line(70, y, width - 50, y)
     y -= 5
-    
+
     c.setFont("Helvetica", 10)
     total_pending = 0
+    admission_date_str = student['admission_date'] or ''
     for fee in unpaid_fees:
-        y -= 15
+        y -= 16
         if y < 150:
             c.showPage()
             y = height - 50
-        
-        c.drawString(70, y, months[fee['month']])
-        c.drawString(200, y, str(fee['year']))
+        period = fee_date_range(fee['month'], fee['year'], admission_date_str)
+        c.drawString(70, y, f"{months[fee['month']]} {fee['year']}")
+        c.drawString(170, y, period)
         c.drawRightString(width - 70, y, f"{fee['fee_amount']:.2f}")
         total_pending += fee['fee_amount']
-    
+
     y -= 20
     c.line(70, y, width - 50, y)
     y -= 20
-    
+
     c.setFont("Helvetica-Bold", 11)
     c.drawString(70, y, "Total Pending:")
     c.drawRightString(width - 70, y, f"Rs. {total_pending:.2f}")
-    
+
     y -= 40
     c.setFont("Helvetica", 10)
     c.drawString(50, y, "Kindly clear the above pending fees at the earliest.")
-    
+
     y = 150
     c.setFont("Helvetica", 10)
     c.drawString(50, y, "For Sansa Learn")
-    
+
     signature_path = 'static/logo/signature.jpg'
     if os.path.exists(signature_path):
         try:
@@ -1264,12 +1299,12 @@ def public_demand_bill(admission_number, token):
             c.drawImage(signature_path, 50, y - 60, width=sig_width, height=sig_height)
         except:
             pass
-    
+
     y -= 70
     c.drawString(50, y, "Management Signature")
-    
+
     c.save()
-    
+
     return send_file(filepath, as_attachment=True)
 
 @app.route('/public/receipt/<admission_number>/<int:fee_id>/<token>')

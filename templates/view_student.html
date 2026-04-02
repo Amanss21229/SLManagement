@@ -162,8 +162,8 @@
                     <table class="table table-sm table-hover">
                         <thead>
                             <tr>
-                                <th>Month</th>
-                                <th>Year</th>
+                                <th>Month/Year</th>
+                                <th>Period (From - To)</th>
                                 <th>Amount</th>
                                 <th>Status</th>
                                 <th>Actions</th>
@@ -172,8 +172,8 @@
                         <tbody>
                             {% for fee in fee_records %}
                             <tr>
-                                <td>{{ months[fee.month] }}</td>
-                                <td>{{ fee.year }}</td>
+                                <td>{{ months[fee.month] }} {{ fee.year }}</td>
+                                <td><small class="text-muted">{{ fee_periods.get(fee.id, '') }}</small></td>
                                 <td>₹{{ "%.2f"|format(fee.fee_amount) }}</td>
                                 <td>
                                     {% if fee.is_paid %}

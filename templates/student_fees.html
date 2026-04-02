@@ -109,6 +109,7 @@
                         <thead>
                             <tr>
                                 <th>Month/Year</th>
+                                <th>Period (From - To)</th>
                                 <th>Amount</th>
                                 <th>Status</th>
                                 <th>Payment Date</th>
@@ -121,6 +122,7 @@
                             {% for fee in fee_records %}
                             <tr class="{% if fee.is_paid %}table-success{% else %}table-warning{% endif %}">
                                 <td>{{ months[fee.month - 1] }} {{ fee.year }}</td>
+                                <td><small class="text-muted">{{ fee_periods.get(fee.id, '') }}</small></td>
                                 <td>₹{{ "%.2f"|format(fee.fee_amount) }}</td>
                                 <td>
                                     {% if fee.is_paid %}
