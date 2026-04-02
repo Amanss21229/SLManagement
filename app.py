@@ -2115,3 +2115,277 @@ def api_notifications():
 def notifications_page():
     notifications = get_pending_notifications()
     return render_template('notifications.html', notifications=notifications)
+
+
+# ── Manager Receipt Generator ──────────────────────────────────────────────────
+
+@app.route('/receipt/generate')
+@login_required
+def receipt_generator():
+    conn = get_db()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute('SELECT id, name, admission_number, class FROM students ORDER BY name')
+    students = cursor.fetchall()
+    conn.close()
+    return render_template('receipt_generator.html', students=students)
+
+
+@app.route('/api/student-fee-months/<int:student_id>')
+@login_required
+def api_student_fee_months(student_id):
+    conn = get_db()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute('SELECT * FROM students WHERE id = %s', (student_id,))
+    student = cursor.fetchone()
+    if not student:
+        conn.close()
+        return jsonify({'error': 'Student not found'}), 404
+
+    ensure_fee_records(student_id, student['admission_date'],
+                       student['fee_per_month'] or 0, student['discount'] or 0)
+
+    cursor.execute('''
+        SELECT * FROM fees WHERE student_id = %s ORDER BY year, month
+    ''', (student_id,))
+    fees = cursor.fetchall()
+    conn.close()
+
+    months_names = ['', 'January', 'February', 'March', 'April', 'May', 'June',
+                    'July', 'August', 'September', 'October', 'November', 'December']
+    admission_date_str = student['admission_date'] or ''
+
+    fee_list = []
+    for fee in fees:
+        fee_list.append({
+            'id': fee['id'],
+            'month': fee['month'],
+            'year': fee['year'],
+            'month_name': months_names[fee['month']],
+            'fee_amount': float(fee['fee_amount']),
+            'is_paid': bool(fee['is_paid']),
+            'payment_date': fee['payment_date'] or '',
+            'payment_mode': fee['payment_mode'] or '',
+            'period': fee_date_range(fee['month'], fee['year'], admission_date_str),
+        })
+
+    return jsonify({
+        'student': {
+            'id': student['id'],
+            'name': student['name'],
+            'admission_number': student['admission_number'],
+            'father_name': student['father_name'],
+            'class': student['class'] or '',
+            'mobile1': student['mobile1'] or '',
+            'mobile2': student['mobile2'] or '',
+        },
+        'fees': fee_list,
+    })
+
+
+@app.route('/receipt/generate/create', methods=['POST'])
+@login_required
+def create_manager_receipt():
+    try:
+        student_id = int(request.form['student_id'])
+    except (KeyError, ValueError):
+        flash('Invalid request.', 'error')
+        return redirect(url_for('receipt_generator'))
+
+    fee_ids = request.form.getlist('fee_ids')
+    if not fee_ids:
+        flash('Please select at least one month.', 'warning')
+        return redirect(url_for('receipt_generator'))
+
+    conn = get_db()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute('SELECT * FROM students WHERE id = %s', (student_id,))
+    student = cursor.fetchone()
+    if not student:
+        conn.close()
+        flash('Student not found.', 'error')
+        return redirect(url_for('receipt_generator'))
+
+    placeholders = ','.join(['%s'] * len(fee_ids))
+    cursor.execute(
+        f'SELECT * FROM fees WHERE id IN ({placeholders}) AND student_id = %s ORDER BY year, month',
+        (*[int(x) for x in fee_ids], student_id)
+    )
+    fees = cursor.fetchall()
+
+    cursor.execute('SELECT * FROM institute_info WHERE id = 1')
+    institute = cursor.fetchone()
+    conn.close()
+
+    if not fees:
+        flash('No fee records found for selected months.', 'error')
+        return redirect(url_for('receipt_generator'))
+
+    months_names = ['', 'January', 'February', 'March', 'April', 'May', 'June',
+                    'July', 'August', 'September', 'October', 'November', 'December']
+    admission_date_str = student['admission_date'] or ''
+
+    timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+    filename = f"mgr_receipt_{student['admission_number']}_{timestamp}.pdf"
+    filepath = os.path.join(PDF_FOLDER, filename)
+
+    c = canvas.Canvas(filepath, pagesize=A4)
+    w, h = A4
+
+    logo_path = 'static/logo/logo.png'
+    if os.path.exists(logo_path):
+        try:
+            c.drawImage(logo_path, (w - 80) / 2, h - 90, width=80, height=80,
+                        preserveAspectRatio=True, mask='auto')
+        except Exception:
+            pass
+
+    c.setFont("Helvetica-Bold", 20)
+    c.drawCentredString(w / 2, h - 110, "SANSA LEARN")
+    c.setFont("Helvetica", 10)
+    if institute:
+        c.drawCentredString(w / 2, h - 130, institute['address'] or '')
+        c.drawCentredString(w / 2, h - 145, f"Contact: {institute['contact']}" if institute['contact'] else '')
+    c.setFont("Helvetica-Bold", 16)
+    c.drawCentredString(w / 2, h - 175, "FEE RECEIPT")
+
+    y = h - 215
+    receipt_no = f"REC{timestamp}{str(student_id).zfill(4)}"
+    c.setFont("Helvetica", 11)
+    c.drawString(50, y, f"Receipt No: {receipt_no}")
+    c.drawRightString(w - 50, y, f"Date: {datetime.now().strftime('%d-%m-%Y')}")
+
+    y -= 30
+    c.line(50, y, w - 50, y)
+    y -= 25
+
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(50, y, "Student Details:")
+    y -= 20
+    c.setFont("Helvetica", 10)
+    c.drawString(70, y, f"Admission No: {student['admission_number']}")
+    y -= 18
+    c.drawString(70, y, f"Name: {student['name']}")
+    y -= 18
+    c.drawString(70, y, f"Father's Name: {student['father_name']}")
+    y -= 18
+    c.drawString(70, y, f"Class: {student['class'] or 'N/A'}")
+
+    y -= 30
+    c.line(50, y, w - 50, y)
+    y -= 25
+
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(50, y, "Fee Details:")
+    y -= 20
+
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(60, y, "Month/Year")
+    c.drawString(175, y, "Period")
+    c.drawString(340, y, "Status")
+    c.drawRightString(w - 50, y, "Amount (Rs.)")
+    y -= 14
+    c.line(60, y, w - 50, y)
+    y -= 5
+
+    c.setFont("Helvetica", 10)
+    total_amount = 0.0
+    for fee in fees:
+        y -= 16
+        if y < 150:
+            c.showPage()
+            y = h - 50
+        period = fee_date_range(fee['month'], fee['year'], admission_date_str)
+        status_txt = "Paid" if fee['is_paid'] else "Pending"
+        c.drawString(60, y, f"{months_names[fee['month']]} {fee['year']}")
+        c.drawString(175, y, period)
+        c.drawString(340, y, status_txt)
+        c.drawRightString(w - 50, y, f"{fee['fee_amount']:.2f}")
+        total_amount += fee['fee_amount']
+
+    y -= 14
+    c.line(60, y, w - 50, y)
+    y -= 20
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(60, y, "Total Amount:")
+    c.drawRightString(w - 50, y, f"Rs. {total_amount:.2f}")
+
+    y -= 40
+    c.setFont("Helvetica", 10)
+    c.drawString(50, y, "Thank you for your payment.")
+
+    y = 150
+    c.setFont("Helvetica", 10)
+    c.drawString(50, y, "For Sansa Learn")
+    signature_path = 'static/logo/signature.jpg'
+    if os.path.exists(signature_path):
+        try:
+            c.drawImage(signature_path, 50, y - 60, width=150, height=50)
+        except Exception:
+            pass
+    y -= 70
+    c.drawString(50, y, "Management Signature")
+    c.save()
+
+    # Build WhatsApp message summary
+    month_lines = []
+    for fee in fees:
+        period = fee_date_range(fee['month'], fee['year'], admission_date_str)
+        status_txt = "Paid" if fee['is_paid'] else "Pending"
+        month_lines.append(
+            f"• {months_names[fee['month']]} {fee['year']} ({period}) - Rs {fee['fee_amount']:.2f} [{status_txt}]"
+        )
+
+    wa_message = (
+        f"✅ *FEE RECEIPT - SANSA LEARN*\n\n"
+        f"👤 Student: *{student['name']}*\n"
+        f"🔢 Admission No: {student['admission_number']}\n"
+        f"📚 Class: {student['class'] or 'N/A'}\n"
+        f"📅 Receipt No: {receipt_no}\n\n"
+        f"📋 *Fee Details:*\n" + "\n".join(month_lines) +
+        f"\n\n💰 *Total: Rs {total_amount:.2f}*\n\n"
+        f"📍 SANSA LEARN, Chandmari Road Kankarbagh\n"
+        f"📞 9296820840, 9153021229"
+    )
+
+    session['mgr_receipt'] = {
+        'filename': filename,
+        'student_name': student['name'],
+        'admission_number': student['admission_number'],
+        'mobile1': student['mobile1'] or '',
+        'mobile2': student['mobile2'] or '',
+        'total': total_amount,
+        'month_count': len(fees),
+        'wa_message': wa_message,
+    }
+
+    return redirect(url_for('receipt_generated_page', filename=filename))
+
+
+@app.route('/receipt/generated/<filename>')
+@login_required
+def receipt_generated_page(filename):
+    receipt_info = session.get('mgr_receipt', {})
+    wa_urls = {}
+    if receipt_info:
+        wa_msg = receipt_info.get('wa_message', '')
+        encoded_msg = quote(wa_msg)
+        m1 = receipt_info.get('mobile1', '').strip().replace('+91', '').replace(' ', '').replace('-', '')
+        m2 = receipt_info.get('mobile2', '').strip().replace('+91', '').replace(' ', '').replace('-', '')
+        if m1:
+            wa_urls['mobile1'] = f"https://wa.me/91{m1}?text={encoded_msg}"
+        if m2:
+            wa_urls['mobile2'] = f"https://wa.me/91{m2}?text={encoded_msg}"
+        wa_urls['encoded_msg'] = encoded_msg
+    return render_template('receipt_generated.html', filename=filename,
+                           receipt_info=receipt_info, wa_urls=wa_urls)
+
+
+@app.route('/receipt/download/<filename>')
+@login_required
+def download_manager_receipt(filename):
+    safe_name = os.path.basename(filename)
+    filepath = os.path.join(PDF_FOLDER, safe_name)
+    if not os.path.exists(filepath):
+        flash('Receipt file not found.', 'error')
+        return redirect(url_for('receipt_generator'))
+    return send_file(filepath, as_attachment=True)

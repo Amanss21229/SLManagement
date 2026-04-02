@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}Receipt Ready - Sansa Learn{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+
+        <div class="text-center mb-4">
+            <div class="display-1 text-success"><i class="fas fa-check-circle"></i></div>
+            <h2 class="mt-2">Receipt Generated Successfully!</h2>
+            <p class="text-muted">
+                {% if receipt_info %}
+                Receipt for <strong>{{ receipt_info.student_name }}</strong>
+                ({{ receipt_info.admission_number }}) —
+                <strong>{{ receipt_info.month_count }} month(s)</strong>,
+                Total: <strong>Rs {{ "%.2f"|format(receipt_info.total) }}</strong>
+                {% endif %}
+            </p>
+        </div>
+
+        <!-- Download -->
+        <div class="card shadow mb-4 border-primary">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="fas fa-download"></i> Download Receipt</h5>
+            </div>
+            <div class="card-body text-center py-4">
+                <p class="text-muted mb-3">Download the PDF receipt to your device.</p>
+                <a href="{{ url_for('download_manager_receipt', filename=filename) }}"
+                   class="btn btn-primary btn-lg px-5">
+                    <i class="fas fa-file-pdf me-2"></i> Download Receipt PDF
+                </a>
+            </div>
+        </div>
+
+        <!-- WhatsApp -->
+        {% if receipt_info %}
+        <div class="card shadow mb-4 border-success">
+            <div class="card-header bg-success text-white">
+                <h5 class="mb-0"><i class="fab fa-whatsapp"></i> Send to WhatsApp</h5>
+            </div>
+            <div class="card-body">
+
+                <!-- Option 1: Registered numbers -->
+                <div class="mb-4">
+                    <h6 class="fw-bold"><i class="fas fa-phone me-2 text-success"></i> Option 1 — Send to Registered Number</h6>
+                    <p class="text-muted small mb-3">Sends the receipt details to the student's saved phone number.</p>
+
+                    {% if wa_urls.get('mobile1') %}
+                    <a href="{{ wa_urls.mobile1 }}" target="_blank" class="btn btn-success me-2 mb-2">
+                        <i class="fab fa-whatsapp me-1"></i> Send to {{ receipt_info.mobile1 }}
+                    </a>
+                    {% endif %}
+
+                    {% if wa_urls.get('mobile2') %}
+                    <a href="{{ wa_urls.mobile2 }}" target="_blank" class="btn btn-outline-success me-2 mb-2">
+                        <i class="fab fa-whatsapp me-1"></i> Send to {{ receipt_info.mobile2 }}
+                    </a>
+                    {% endif %}
+
+                    {% if not wa_urls.get('mobile1') and not wa_urls.get('mobile2') %}
+                    <div class="alert alert-warning py-2 mb-0">
+                        <i class="fas fa-exclamation-triangle me-1"></i>
+                        No phone number saved in this student's profile.
+                    </div>
+                    {% endif %}
+                </div>
+
+                <hr>
+
+                <!-- Option 2: Any number -->
+                <div>
+                    <h6 class="fw-bold"><i class="fas fa-keyboard me-2 text-primary"></i> Option 2 — Send to Any Number</h6>
+                    <p class="text-muted small mb-2">Enter any WhatsApp number to send the receipt to.</p>
+                    <div class="input-group mb-1" style="max-width:440px;">
+                        <span class="input-group-text"><i class="fab fa-whatsapp text-success"></i> +91</span>
+                        <input type="tel" class="form-control" id="customNumber"
+                               placeholder="10-digit mobile number" maxlength="10"
+                               oninput="this.value=this.value.replace(/\D/g,'')">
+                        <button class="btn btn-success" onclick="sendCustomWhatsapp()">
+                            Send <i class="fas fa-arrow-right ms-1"></i>
+                        </button>
+                    </div>
+                    <small class="text-muted">WhatsApp will open with receipt details pre-filled in the message.</small>
+                </div>
+
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="text-center mt-3 mb-4">
+            <a href="{{ url_for('receipt_generator') }}" class="btn btn-outline-secondary">
+                <i class="fas fa-redo me-1"></i> Generate Another Receipt
+            </a>
+            <a href="{{ url_for('dashboard') }}" class="btn btn-outline-primary ms-2">
+                <i class="fas fa-home me-1"></i> Dashboard
+            </a>
+        </div>
+
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const encodedMsg = "{{ wa_urls.get('encoded_msg', '') }}";
+
+function sendCustomWhatsapp() {
+    const num = document.getElementById('customNumber').value.trim();
+    if (num.length !== 10) {
+        alert('Please enter a valid 10-digit mobile number.');
+        return;
+    }
+    const url = 'https://wa.me/91' + num + '?text=' + encodedMsg;
+    window.open(url, '_blank');
+}
+</script>
+{% endblock %}

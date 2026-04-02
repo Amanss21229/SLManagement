@@ -1,0 +1,265 @@
+{% extends "base.html" %}
+{% block title %}Generate Receipt - Sansa Learn{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h2><i class="fas fa-file-invoice text-success"></i> Generate Receipt</h2>
+        <p class="text-muted">Select a student and choose the months to include in the receipt.</p>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Step 1: Choose Student -->
+    <div class="col-md-4">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><span class="badge bg-light text-primary me-2">1</span> Select Student</h5>
+            </div>
+            <div class="card-body">
+                <label class="form-label fw-semibold">Search Student</label>
+                <input type="text" class="form-control mb-2" id="studentSearch" placeholder="Type name or admission no...">
+                <select class="form-select" id="studentSelect" size="12" style="height:280px;">
+                    {% for s in students %}
+                    <option value="{{ s.id }}" data-name="{{ s.name }}" data-adm="{{ s.admission_number }}">
+                        {{ s.name }} — {{ s.admission_number }}{% if s.class %} ({{ s.class }}){% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+                <div class="mt-2">
+                    <small class="text-muted">{{ students|length }} student(s) listed</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Step 2: Choose Months -->
+    <div class="col-md-8">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><span class="badge bg-light text-success me-2">2</span> Select Months</h5>
+                <div id="selectActions" class="d-none">
+                    <button class="btn btn-sm btn-light me-1" onclick="selectAll()">Select All</button>
+                    <button class="btn btn-sm btn-outline-light" onclick="deselectAll()">Clear</button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div id="loadingMsg" class="text-center text-muted py-5 d-none">
+                    <div class="spinner-border text-primary" role="status"></div>
+                    <p class="mt-2">Loading fee months...</p>
+                </div>
+                <div id="noStudentMsg" class="text-center text-muted py-5">
+                    <i class="fas fa-hand-point-left fa-3x mb-3 text-secondary"></i>
+                    <p>Select a student from the left to see their fee months.</p>
+                </div>
+                <div id="feeMonthsSection" class="d-none">
+                    <div id="studentBanner" class="alert alert-info mb-3 py-2"></div>
+                    <div id="feeMonthsList" class="row g-2"></div>
+                    <hr>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <strong>Selected: <span id="selectedCount" class="text-success">0</span> month(s)</strong>
+                            &nbsp;|&nbsp;
+                            <strong>Total: <span id="selectedTotal" class="text-danger">Rs 0.00</span></strong>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Step 3: Generate -->
+<div class="row mt-4" id="generateSection" style="display:none!important;">
+    <div class="col-12">
+        <div class="card shadow-sm border-warning">
+            <div class="card-header bg-warning">
+                <h5 class="mb-0"><span class="badge bg-dark me-2">3</span> Generate Receipt</h5>
+            </div>
+            <div class="card-body">
+                <form id="receiptForm" action="{{ url_for('create_manager_receipt') }}" method="POST">
+                    <input type="hidden" name="student_id" id="formStudentId">
+                    <div id="formFeeIds"></div>
+                    <div class="d-flex gap-3 align-items-center">
+                        <button type="submit" class="btn btn-warning btn-lg px-4">
+                            <i class="fas fa-file-pdf"></i> Generate Receipt PDF
+                        </button>
+                        <span class="text-muted">for <strong id="summaryText">—</strong></span>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentStudentData = null;
+let selectedFeeIds = new Set();
+
+const studentSelect = document.getElementById('studentSelect');
+const studentSearch = document.getElementById('studentSearch');
+
+studentSearch.addEventListener('input', function() {
+    const q = this.value.toLowerCase();
+    Array.from(studentSelect.options).forEach(opt => {
+        const visible = opt.dataset.name.toLowerCase().includes(q) ||
+                        opt.dataset.adm.toLowerCase().includes(q);
+        opt.style.display = visible ? '' : 'none';
+    });
+});
+
+studentSelect.addEventListener('change', function() {
+    const sid = this.value;
+    if (!sid) return;
+    loadStudentFees(sid);
+});
+
+function loadStudentFees(studentId) {
+    document.getElementById('noStudentMsg').classList.add('d-none');
+    document.getElementById('feeMonthsSection').classList.add('d-none');
+    document.getElementById('loadingMsg').classList.remove('d-none');
+    document.getElementById('generateSection').style.display = 'none';
+    selectedFeeIds.clear();
+
+    fetch(`/api/student-fee-months/${studentId}`)
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById('loadingMsg').classList.add('d-none');
+            if (data.error) {
+                alert(data.error);
+                return;
+            }
+            currentStudentData = data;
+            renderFeeMonths(data);
+        })
+        .catch(() => {
+            document.getElementById('loadingMsg').classList.add('d-none');
+            alert('Failed to load student data. Please try again.');
+        });
+}
+
+function renderFeeMonths(data) {
+    const student = data.student;
+    const fees = data.fees;
+
+    document.getElementById('studentBanner').innerHTML =
+        `<i class="fas fa-user me-2"></i><strong>${student.name}</strong> &nbsp;|&nbsp;
+         ${student.admission_number} &nbsp;|&nbsp; Class: ${student.class || 'N/A'}`;
+
+    const list = document.getElementById('feeMonthsList');
+    list.innerHTML = '';
+
+    if (fees.length === 0) {
+        list.innerHTML = '<div class="col-12"><p class="text-muted">No fee months found for this student.</p></div>';
+    } else {
+        fees.forEach(fee => {
+            const isPaid = fee.is_paid;
+            const badgeClass = isPaid ? 'bg-success' : 'bg-warning text-dark';
+            const badgeText = isPaid ? 'Paid' : 'Pending';
+            const col = document.createElement('div');
+            col.className = 'col-md-4 col-sm-6';
+            col.innerHTML = `
+                <div class="card fee-card border-2 h-100" data-fee-id="${fee.id}" data-amount="${fee.fee_amount}" style="cursor:pointer;">
+                    <div class="card-body p-2">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <strong>${fee.month_name} ${fee.year}</strong>
+                                <span class="badge ${badgeClass} ms-1" style="font-size:0.7em;">${badgeText}</span>
+                            </div>
+                            <div class="form-check m-0">
+                                <input class="form-check-input fee-checkbox" type="checkbox"
+                                       data-fee-id="${fee.id}" data-amount="${fee.fee_amount}">
+                            </div>
+                        </div>
+                        <small class="text-muted d-block mt-1">${fee.period || ''}</small>
+                        <div class="fw-bold text-primary mt-1">Rs ${fee.fee_amount.toFixed(2)}</div>
+                    </div>
+                </div>`;
+            list.appendChild(col);
+
+            const card = col.querySelector('.fee-card');
+            const checkbox = col.querySelector('.fee-checkbox');
+            card.addEventListener('click', function(e) {
+                if (e.target !== checkbox) checkbox.checked = !checkbox.checked;
+                toggleFee(fee.id, fee.fee_amount, checkbox.checked, card);
+            });
+            checkbox.addEventListener('change', function() {
+                toggleFee(fee.id, fee.fee_amount, this.checked, card);
+            });
+        });
+    }
+
+    document.getElementById('feeMonthsSection').classList.remove('d-none');
+    document.getElementById('selectActions').classList.remove('d-none');
+    updateSummary();
+}
+
+function toggleFee(feeId, amount, checked, card) {
+    if (checked) {
+        selectedFeeIds.add(feeId);
+        card.classList.add('border-primary', 'bg-light');
+    } else {
+        selectedFeeIds.delete(feeId);
+        card.classList.remove('border-primary', 'bg-light');
+    }
+    updateSummary();
+}
+
+function selectAll() {
+    document.querySelectorAll('.fee-checkbox').forEach(cb => {
+        cb.checked = true;
+        const card = cb.closest('.fee-card');
+        selectedFeeIds.add(parseInt(cb.dataset.feeId));
+        card.classList.add('border-primary', 'bg-light');
+    });
+    updateSummary();
+}
+
+function deselectAll() {
+    document.querySelectorAll('.fee-checkbox').forEach(cb => {
+        cb.checked = false;
+        const card = cb.closest('.fee-card');
+        selectedFeeIds.delete(parseInt(cb.dataset.feeId));
+        card.classList.remove('border-primary', 'bg-light');
+    });
+    updateSummary();
+}
+
+function updateSummary() {
+    let total = 0;
+    document.querySelectorAll('.fee-checkbox:checked').forEach(cb => {
+        total += parseFloat(cb.dataset.amount);
+    });
+    const count = selectedFeeIds.size;
+    document.getElementById('selectedCount').textContent = count;
+    document.getElementById('selectedTotal').textContent = 'Rs ' + total.toFixed(2);
+
+    const genSection = document.getElementById('generateSection');
+    if (count > 0 && currentStudentData) {
+        genSection.style.removeProperty('display');
+        genSection.style.display = 'block';
+        document.getElementById('formStudentId').value = currentStudentData.student.id;
+        const container = document.getElementById('formFeeIds');
+        container.innerHTML = '';
+        selectedFeeIds.forEach(id => {
+            const inp = document.createElement('input');
+            inp.type = 'hidden';
+            inp.name = 'fee_ids';
+            inp.value = id;
+            container.appendChild(inp);
+        });
+        document.getElementById('summaryText').textContent =
+            `${currentStudentData.student.name} — ${count} month(s) — Rs ${total.toFixed(2)}`;
+    } else {
+        genSection.style.display = 'none';
+    }
+}
+</script>
+<style>
+.fee-card { transition: all 0.15s ease; }
+.fee-card:hover { box-shadow: 0 0 0 2px #0d6efd55; }
+.fee-card.border-primary { box-shadow: 0 0 0 3px #0d6efd99; }
+</style>
+{% endblock %}
