@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block title %}Pending Fee Notifications - Sansa Learn{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center">
+            <h2><i class="fas fa-bell text-warning"></i> Pending Fee Notifications</h2>
+            <span class="badge bg-danger fs-6">{{ notifications|length }} Student{{ 's' if notifications|length != 1 }}</span>
+        </div>
+        <p class="text-muted mt-1">Students whose monthly fee is due and payment is pending.</p>
+    </div>
+</div>
+
+{% if notifications %}
+<div class="row mb-3">
+    <div class="col-12">
+        <div class="alert alert-warning d-flex align-items-center gap-2">
+            <i class="fas fa-exclamation-triangle fa-lg"></i>
+            <div>
+                <strong>{{ notifications|length }}</strong> student{{ 's have' if notifications|length != 1 else ' has' }} pending fee payments.
+                Total outstanding amount: <strong>Rs {{ "%.2f"|format(notifications|sum(attribute='total_due')) }}</strong>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        <div class="card shadow-sm">
+            <div class="card-header bg-danger text-white">
+                <h5 class="mb-0"><i class="fas fa-clock"></i> Students With Pending Payments</h5>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>#</th>
+                                <th>Student Name</th>
+                                <th>Admission No</th>
+                                <th>Latest Due Month</th>
+                                <th>Pending Months</th>
+                                <th>Total Due</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for n in notifications %}
+                            <tr>
+                                <td>{{ loop.index }}</td>
+                                <td>
+                                    <i class="fas fa-user-circle text-secondary me-1"></i>
+                                    <strong>{{ n.name }}</strong>
+                                </td>
+                                <td><code>{{ n.admission_number }}</code></td>
+                                <td>
+                                    <span class="badge bg-warning text-dark">
+                                        {{ n.latest_month }} {{ n.latest_year }}
+                                    </span>
+                                </td>
+                                <td>
+                                    <span class="badge bg-secondary">{{ n.unpaid_count }} month{{ 's' if n.unpaid_count != 1 }}</span>
+                                </td>
+                                <td>
+                                    <strong class="text-danger">Rs {{ "%.2f"|format(n.total_due) }}</strong>
+                                </td>
+                                <td>
+                                    <a href="{{ url_for('student_fees', student_id=n.student_id) }}" class="btn btn-sm btn-primary">
+                                        <i class="fas fa-money-bill"></i> View Fees
+                                    </a>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% else %}
+<div class="row">
+    <div class="col-12">
+        <div class="card shadow-sm">
+            <div class="card-body text-center py-5">
+                <i class="fas fa-check-circle fa-4x text-success mb-3"></i>
+                <h4 class="text-success">All Payments Up To Date!</h4>
+                <p class="text-muted">No pending fee payments at this time.</p>
+                <a href="{{ url_for('dashboard') }}" class="btn btn-primary mt-2">
+                    <i class="fas fa-home"></i> Back to Dashboard
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

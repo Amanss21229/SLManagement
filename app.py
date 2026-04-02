@@ -186,7 +186,7 @@ def ensure_fee_records(student_id, admission_date, fee_per_month, discount=0.0):
                 VALUES (%s, %s, %s, %s, 0)
             ''', (student_id, month, year, net_fee))
         
-        temp_dt = temp_dt.replace(day=1) + relativedelta(months=1)
+        temp_dt = temp_dt + relativedelta(months=1)
     
     conn.commit()
     conn.close()
@@ -1679,6 +1679,16 @@ def export_fees():
     
     return send_file(filepath, as_attachment=True)
 
+def _format_session_rows(rows):
+    result = []
+    for row in rows:
+        d = dict(row)
+        for key in ('created_at', 'last_seen_at'):
+            if d.get(key) and not isinstance(d[key], str):
+                d[key] = d[key].strftime('%Y-%m-%d %H:%M')
+        result.append(d)
+    return result
+
 @app.route('/sessions')
 @login_required
 def manage_sessions():
@@ -1690,7 +1700,7 @@ def manage_sessions():
         WHERE is_active = 1
         ORDER BY last_seen_at DESC
     ''')
-    active_sessions = cursor.fetchall()
+    active_sessions = _format_session_rows(cursor.fetchall())
     
     cursor.execute('''
         SELECT * FROM manager_sessions 
@@ -1698,7 +1708,7 @@ def manage_sessions():
         ORDER BY last_seen_at DESC
         LIMIT 10
     ''')
-    inactive_sessions = cursor.fetchall()
+    inactive_sessions = _format_session_rows(cursor.fetchall())
     
     conn.close()
     
@@ -2015,3 +2025,58 @@ def restore_backup():
         flash(f'Error restoring backup: {str(e)}', 'error')
     
     return redirect(url_for('backup_page'))
+
+
+def get_pending_notifications():
+    """Return list of students who have at least one unpaid due fee."""
+    conn = get_db()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    months_names = ['', 'January', 'February', 'March', 'April', 'May', 'June',
+                    'July', 'August', 'September', 'October', 'November', 'December']
+    try:
+        cursor.execute('''
+            SELECT s.id, s.name, s.admission_number, s.mobile1,
+                   COUNT(f.id) AS unpaid_count,
+                   COALESCE(SUM(f.fee_amount), 0) AS total_due,
+                   MAX(f.year * 100 + f.month) AS latest_due_ym,
+                   MAX(f.month) AS latest_month,
+                   MAX(f.year) AS latest_year
+            FROM students s
+            JOIN fees f ON s.id = f.student_id
+            WHERE f.is_paid = 0
+            GROUP BY s.id, s.name, s.admission_number, s.mobile1
+            ORDER BY latest_due_ym DESC, s.name
+        ''')
+        rows = cursor.fetchall()
+        notifications = []
+        for row in rows:
+            month_name = months_names[row['latest_month']] if row['latest_month'] else ''
+            notifications.append({
+                'student_id': row['id'],
+                'name': row['name'],
+                'admission_number': row['admission_number'],
+                'unpaid_count': row['unpaid_count'],
+                'total_due': float(row['total_due']),
+                'latest_month': month_name,
+                'latest_year': row['latest_year'],
+            })
+        return notifications
+    finally:
+        conn.close()
+
+
+@app.route('/api/notifications')
+@login_required
+def api_notifications():
+    notifications = get_pending_notifications()
+    return jsonify({
+        'count': len(notifications),
+        'notifications': notifications
+    })
+
+
+@app.route('/notifications')
+@login_required
+def notifications_page():
+    notifications = get_pending_notifications()
+    return render_template('notifications.html', notifications=notifications)

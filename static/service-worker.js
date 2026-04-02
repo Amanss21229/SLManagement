@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sansalearn-cache-v1';
+const CACHE_NAME = 'sansalearn-cache-v2';
 const urlsToCache = [
   '/',
   '/static/css/style.css',
@@ -34,6 +34,23 @@ self.addEventListener('activate', (event) => {
     })
   );
   self.clients.claim();
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = (event.notification.data && event.notification.data.url) ? event.notification.data.url : '/notifications';
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if (client.url.includes(url) && 'focus' in client) {
+          return client.focus();
+        }
+      }
+      if (clients.openWindow) {
+        return clients.openWindow(url);
+      }
+    })
+  );
 });
 
 self.addEventListener('fetch', (event) => {

@@ -23,8 +23,14 @@
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
                 <span class="navbar-toggler-icon"></span>
             </button>
+            {% if session.get('authenticated') %}
+            <a href="{{ url_for('notifications_page') }}" class="btn btn-sm btn-warning ms-2 position-relative notification-bell d-lg-none" id="notifBellMobile" title="Pending Payments">
+                <i class="fas fa-bell"></i>
+                <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger d-none" id="notifCountMobile">0</span>
+            </a>
+            {% endif %}
             <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav ms-auto">
+                <ul class="navbar-nav ms-auto align-items-lg-center">
                     <li class="nav-item">
                         <a class="nav-link" href="{{ url_for('dashboard') }}">
                             <i class="fas fa-home"></i> Dashboard
@@ -64,6 +70,14 @@
                             <i class="fas fa-shield-alt"></i> Sessions
                         </a>
                     </li>
+                    {% if session.get('authenticated') %}
+                    <li class="nav-item">
+                        <a class="nav-link position-relative" href="{{ url_for('notifications_page') }}" id="notifBellDesktop" title="Pending Payments">
+                            <i class="fas fa-bell"></i>
+                            <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger d-none" id="notifCountDesktop">0</span>
+                        </a>
+                    </li>
+                    {% endif %}
                     <li class="nav-item">
                         <a class="nav-link" href="{{ url_for('logout') }}">
                             <i class="fas fa-sign-out-alt"></i> Logout
@@ -101,12 +115,74 @@
                 navigator.serviceWorker.register('/static/service-worker.js')
                     .then(function(registration) {
                         console.log('ServiceWorker registration successful');
+                        window._swRegistration = registration;
                     })
                     .catch(function(err) {
                         console.log('ServiceWorker registration failed: ', err);
                     });
             });
         }
+
+        {% if session.get('authenticated') %}
+        function updateNotifBadge(count) {
+            ['notifCountDesktop', 'notifCountMobile'].forEach(function(id) {
+                var el = document.getElementById(id);
+                if (!el) return;
+                if (count > 0) {
+                    el.textContent = count > 99 ? '99+' : count;
+                    el.classList.remove('d-none');
+                } else {
+                    el.classList.add('d-none');
+                }
+            });
+        }
+
+        function showBrowserNotification(count) {
+            if (!('Notification' in window) || Notification.permission !== 'granted') return;
+            if (count <= 0) return;
+            var title = 'SANSA LEARN - Pending Fees';
+            var body = count + ' student' + (count > 1 ? 's have' : ' has') + ' pending fee payment.';
+            if (window._swRegistration) {
+                window._swRegistration.showNotification(title, {
+                    body: body,
+                    icon: '/static/icons/icon-192x192.png',
+                    badge: '/static/icons/icon-96x96.png',
+                    tag: 'fee-pending',
+                    renotify: false,
+                    data: { url: '/notifications' }
+                });
+            } else {
+                new Notification(title, { body: body, icon: '/static/icons/icon-192x192.png' });
+            }
+        }
+
+        var _lastNotifCount = -1;
+        function fetchNotifications() {
+            fetch('/api/notifications')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    var count = data.count || 0;
+                    updateNotifBadge(count);
+                    if (_lastNotifCount !== -1 && count > _lastNotifCount) {
+                        showBrowserNotification(count);
+                    }
+                    _lastNotifCount = count;
+                })
+                .catch(function() {});
+        }
+
+        function requestNotifPermission() {
+            if ('Notification' in window && Notification.permission === 'default') {
+                Notification.requestPermission();
+            }
+        }
+
+        window.addEventListener('load', function() {
+            requestNotifPermission();
+            fetchNotifications();
+            setInterval(fetchNotifications, 60000);
+        });
+        {% endif %}
     </script>
     {% block scripts %}{% endblock %}
 </body>
