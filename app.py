@@ -2335,6 +2335,13 @@ def create_manager_receipt():
             f"• {months_names[fee['month']]} {fee['year']} ({period}) - Rs {fee['fee_amount']:.2f} [{status_txt}]"
         )
 
+    token = generate_pdf_token(student['admission_number'])
+    public_pdf_url = url_for('public_mgr_receipt',
+                             admission_number=student['admission_number'],
+                             filename=filename,
+                             token=token,
+                             _external=True)
+
     wa_message = (
         f"✅ *FEE RECEIPT - SANSA LEARN*\n\n"
         f"👤 Student: *{student['name']}*\n"
@@ -2343,6 +2350,7 @@ def create_manager_receipt():
         f"📅 Receipt No: {receipt_no}\n\n"
         f"📋 *Fee Details:*\n" + "\n".join(month_lines) +
         f"\n\n💰 *Total: Rs {total_amount:.2f}*\n\n"
+        f"📄 *Download Receipt PDF:*\n{public_pdf_url}\n\n"
         f"📍 SANSA LEARN, Chandmari Road Kankarbagh\n"
         f"📞 9296820840, 9153021229"
     )
@@ -2356,6 +2364,7 @@ def create_manager_receipt():
         'total': total_amount,
         'month_count': len(fees),
         'wa_message': wa_message,
+        'public_pdf_url': public_pdf_url,
     }
 
     return redirect(url_for('receipt_generated_page', filename=filename))
@@ -2389,3 +2398,16 @@ def download_manager_receipt(filename):
         flash('Receipt file not found.', 'error')
         return redirect(url_for('receipt_generator'))
     return send_file(filepath, as_attachment=True)
+
+
+@app.route('/public/mgr-receipt/<admission_number>/<filename>/<token>')
+def public_mgr_receipt(admission_number, filename, token):
+    if not verify_pdf_token(admission_number, token):
+        return "Invalid or expired link", 403
+    safe_name = os.path.basename(filename)
+    if not safe_name.startswith('mgr_receipt_'):
+        return "Invalid file", 403
+    filepath = os.path.join(PDF_FOLDER, safe_name)
+    if not os.path.exists(filepath):
+        return "Receipt not found", 404
+    return send_file(filepath, as_attachment=False, mimetype='application/pdf')

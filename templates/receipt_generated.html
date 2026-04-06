@@ -40,10 +40,21 @@
             </div>
             <div class="card-body">
 
+                <!-- PDF link info -->
+                {% if receipt_info.get('public_pdf_url') %}
+                <div class="alert alert-info py-2 mb-3 d-flex align-items-center gap-2">
+                    <i class="fas fa-file-pdf fa-lg text-danger"></i>
+                    <div>
+                        <strong>Receipt PDF link is included in the WhatsApp message.</strong>
+                        <span class="text-muted small d-block">The recipient can open and download the PDF directly from WhatsApp.</span>
+                    </div>
+                </div>
+                {% endif %}
+
                 <!-- Option 1: Registered numbers -->
                 <div class="mb-4">
                     <h6 class="fw-bold"><i class="fas fa-phone me-2 text-success"></i> Option 1 — Send to Registered Number</h6>
-                    <p class="text-muted small mb-3">Sends the receipt details to the student's saved phone number.</p>
+                    <p class="text-muted small mb-3">Sends the receipt details + PDF link to the student's saved phone number.</p>
 
                     {% if wa_urls.get('mobile1') %}
                     <a href="{{ wa_urls.mobile1 }}" target="_blank" class="btn btn-success me-2 mb-2">
@@ -70,7 +81,7 @@
                 <!-- Option 2: Any number -->
                 <div>
                     <h6 class="fw-bold"><i class="fas fa-keyboard me-2 text-primary"></i> Option 2 — Send to Any Number</h6>
-                    <p class="text-muted small mb-2">Enter any WhatsApp number to send the receipt to.</p>
+                    <p class="text-muted small mb-2">Enter any WhatsApp number to send the receipt + PDF link to.</p>
                     <div class="input-group mb-1" style="max-width:440px;">
                         <span class="input-group-text"><i class="fab fa-whatsapp text-success"></i> +91</span>
                         <input type="tel" class="form-control" id="customNumber"
@@ -80,7 +91,7 @@
                             Send <i class="fas fa-arrow-right ms-1"></i>
                         </button>
                     </div>
-                    <small class="text-muted">WhatsApp will open with receipt details pre-filled in the message.</small>
+                    <small class="text-muted">WhatsApp will open with receipt details and PDF link pre-filled in the message.</small>
                 </div>
 
             </div>
